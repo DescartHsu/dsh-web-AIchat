@@ -1,4 +1,5 @@
 import { safeWebUrl } from './providers.js'
+import { guestThemeCSS, installGuestTheme } from './theme.js'
 
 /** Owns leases independently of React mounts, so switching panels preserves pages. */
 export function createGuestManager({ bridge, document, onChange = () => {} }) {
@@ -10,6 +11,8 @@ export function createGuestManager({ bridge, document, onChange = () => {} }) {
   let visibleId = null
   let viewport = null
   let disposePromise
+  let theme = null
+  let themeFingerprint = 'null'
   const available = !!bridge && typeof bridge.acquire === 'function' && typeof bridge.release === 'function'
 
   function notify(id, patch) {
@@ -22,6 +25,7 @@ export function createGuestManager({ bridge, document, onChange = () => {} }) {
     catch { /* Desktop also releases window-owned leases when the window closes. */ }
   }
   function cleanup(entry) {
+    entry.closed = true
     entry.unsubscribe?.()
     for (const [event, listener] of entry.listeners) entry.element.removeEventListener(event, listener)
     entry.container.remove()
@@ -38,6 +42,42 @@ export function createGuestManager({ bridge, document, onChange = () => {} }) {
     }
   }
   function show(id, host) { visibleId = id; viewport = host; reposition() }
+  function syncTheme(id, entry) {
+    entry.themeRevision = (entry.themeRevision || 0) + 1
+    if (entry.themeTask || !entry.ready || typeof entry.element.executeJavaScript !== 'function'
+      || typeof entry.element.insertCSS !== 'function' || typeof entry.element.removeInsertedCSS !== 'function') return
+    entry.themeTask = Promise.resolve().then(async () => {
+      while (!disposed && !entry.closed && entries.get(id) === entry) {
+        const revision = entry.themeRevision
+        const palette = theme
+        try {
+          const active = await entry.element.executeJavaScript(`(${installGuestTheme.toString()})(${JSON.stringify(entry.origin)}, ${!!palette})`)
+          if (disposed || entry.closed) return
+          const key = active && palette ? await entry.element.insertCSS(guestThemeCSS(palette), { cssOrigin: 'user' }) : null
+          const old = entry.cssKey
+          entry.cssKey = key
+          if (old) await entry.element.removeInsertedCSS(old).catch(() => {})
+          if (!disposed && !entry.closed) notify(id, { themeError: '' })
+        } catch {
+          if (!disposed && !entry.closed && revision === entry.themeRevision) {
+            notify(id, { themeError: '官网配色同步未完成，可点“重新打开”重试。' })
+          }
+        }
+        entry.themeApplied = revision
+        if (revision === entry.themeRevision) break
+      }
+    }).finally(() => {
+      entry.themeTask = null
+      if (!disposed && !entry.closed && entry.themeApplied !== entry.themeRevision) syncTheme(id, entry)
+    })
+  }
+  function setTheme(palette) {
+    const fingerprint = JSON.stringify(palette)
+    if (themeFingerprint === fingerprint) return
+    themeFingerprint = fingerprint
+    theme = palette
+    for (const [id, entry] of entries) syncTheme(id, entry)
+  }
   function hide(host) {
     // A stale React cleanup cannot hide a newer mount's guest.
     if (host && viewport !== host) return
@@ -60,7 +100,7 @@ export function createGuestManager({ bridge, document, onChange = () => {} }) {
         if (disposed || cancelled.has(token)) { await release(lease); return null }
         const element = document.createElement('webview')
         const container = document.createElement('div')
-        entry = { element, container, lease, listeners: [], ready: false }
+        entry = { element, container, lease, listeners: [], ready: false, origin: new URL(url).origin }
         container.setAttribute('data-dsh-web-aichat', provider.id)
         Object.assign(container.style, { position: 'fixed', display: 'none', zIndex: '20' })
         Object.assign(element.style, { width: '100%', height: '100%', display: 'flex', border: '0' })
@@ -81,6 +121,9 @@ export function createGuestManager({ bridge, document, onChange = () => {} }) {
             booted = true
             Promise.resolve(element.loadURL(url)).catch(() => notify(provider.id, { loading: false, error: '官网加载失败，请重试或在浏览器中打开。' }))
           }
+          // Each new document needs its own stylesheet, even if the palette is unchanged.
+          entry.cssKey = null
+          syncTheme(provider.id, entry)
         })
         listen('did-start-loading', () => notify(provider.id, { loading: true, error: '' }))
         listen('did-stop-loading', () => notify(provider.id, { loading: false }))
@@ -89,6 +132,7 @@ export function createGuestManager({ bridge, document, onChange = () => {} }) {
           if (event.isMainFrame === false) return
           const current = safeWebUrl(event.url)
           if (current) notify(provider.id, { url: current })
+          if (entry.ready) syncTheme(provider.id, entry)
         }
         listen('did-navigate', navigated)
         listen('did-navigate-in-page', navigated)
@@ -160,6 +204,6 @@ export function createGuestManager({ bridge, document, onChange = () => {} }) {
     })()
     return disposePromise
   }
-  return { available, ensure, show, hide, reposition, close, navigate, dispose,
+  return { available, ensure, show, hide, reposition, close, navigate, dispose, setTheme,
     status: id => statuses.get(id) || {}, dismissPopup: id => notify(id, { popup: '' }) }
 }

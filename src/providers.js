@@ -40,7 +40,7 @@ export function normalizeConfig(value) {
       } catch { /* Ignore malformed stored entries, keeping the usable ones. */ }
     }
   }
-  return { version: 1, custom, selected: ids.has(value?.selected) ? value.selected : 'deepseek' }
+  return { version: 1, custom, selected: ids.has(value?.selected) ? value.selected : 'deepseek', followTheme: value?.followTheme !== false }
 }
 
 export function readConfig(storage) {

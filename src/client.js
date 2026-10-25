@@ -1,6 +1,7 @@
 import { DEFAULT_PROVIDERS, readConfig, writeConfig, validateCustomProvider } from './providers.js'
 import { createGuestManager } from './guest-manager.js'
 import css from './styles.css'
+import { watchHostTheme } from './theme.js'
 
 window.__ModuleLoader__.load({
   id: 'dsh-web-aichat',
@@ -13,9 +14,11 @@ window.__ModuleLoader__.load({
     let config = readConfig(localStorage)
     let manager
     let storageNotice = ''
+    let hostTheme = null
     const providers = () => [...DEFAULT_PROVIDERS, ...config.custom]
     function save(next) {
       config = next
+      manager?.setTheme(config.followTheme ? hostTheme : null)
       storageNotice = writeConfig(localStorage, config) ? '' : '当前选择可用，但浏览器设置阻止了偏好保存。'
       notify()
     }
@@ -123,7 +126,7 @@ window.__ModuleLoader__.load({
         h('header', { className: 'aic-header' },
           h('div', { className: 'aic-brand' }, h(Icon, { size: 24 }), h('div', null, h('h1', null, 'AI Chat'), h('p', null, '常用 AI 官网，一个入口'))),
           h('button', { className: 'aic-button', disabled: reopening, onClick: () => setSettings(value => !value), 'aria-expanded': settings }, settings ? '返回聊天' : '管理网站')),
-        h('nav', { className: 'aic-tabs', role: 'tablist', 'aria-label': 'AI 官网' },
+        h('nav', { className: 'aic-tabs', role: 'tablist', 'aria-label': 'AI Chat' },
           providers().map(item => h('button', { id: `aic-tab-${item.id}`, key: item.id, role: 'tab',
             className: 'aic-tab', type: 'button', disabled: reopening, 'aria-selected': current.id === item.id,
             'aria-controls': 'aic-content', tabIndex: current.id === item.id ? 0 : -1,
@@ -137,9 +140,12 @@ window.__ModuleLoader__.load({
             button('刷新', '刷新当前网页', () => void manager.navigate(current.id, 'reload')),
             h('span', { className: 'aic-address', title: state.url || current.url }, state.url || current.url),
             button('复制地址', '复制当前网址', () => void copyUrl(), false),
+            h('button', { type: 'button', className: 'aic-button', 'aria-pressed': config.followTheme,
+              title: '同步官网内部配色；关闭可恢复官网原色',
+              onClick: () => save({ ...config, followTheme: !config.followTheme }) }, config.followTheme ? '跟随皮肤' : '官网原色'),
             button('重新打开', '关闭并重新创建当前网页', () => void reopen(), !manager.available || reopening)),
           h('div', { className: `aic-status${state.error ? ' aic-error' : ''}`, role: state.error ? 'alert' : 'status', 'aria-live': 'polite' },
-            state.error || (reopening ? '正在重新打开…' : state.loading ? `正在加载 ${current.name}…` : notice || storageNotice || '切换 AI 或离开面板时保留页面 · 登录由官网处理')),
+            state.error || state.themeError || (reopening ? '正在重新打开…' : state.loading ? `正在加载 ${current.name}…` : notice || storageNotice || '切换 AI 或离开面板时保留页面 · 登录由官网处理')),
           state.popup ? h('div', { className: 'aic-popup' },
             h('span', null, '官网请求打开：', h('code', null, state.popup)),
             button('在当前页打开', '在当前页打开该链接', () => void manager.navigate(current.id, 'url', state.popup)),
@@ -147,7 +153,7 @@ window.__ModuleLoader__.load({
           h('div', { id: 'aic-content', role: 'tabpanel', 'aria-labelledby': `aic-tab-${current.id}`,
             className: 'aic-viewport', ref: hostRef },
             !manager.available ? h('div', { className: 'aic-empty' }, h(Icon, { size: 38 }),
-              h('h2', null, '在 DSH Desktop 中打开 AI 官网'),
+              h('h2', null, '在 DSH Desktop 中打开 AI Chat'),
               h('p', null, '内嵌聊天需要桌面客户端的 Browser guest bridge。当前环境可使用顶部标签选择网站并复制地址。'),
               h('code', null, current.url)) : null)))
     }
@@ -160,10 +166,14 @@ window.__ModuleLoader__.load({
         style.dataset.dshWebAichat = ''
         style.textContent = css
         document.head.appendChild(style)
-        return async () => { style.remove(); await owned.dispose(); listeners.clear() }
+        const stopTheme = watchHostTheme(document, theme => {
+          hostTheme = theme
+          owned.setTheme(config.followTheme ? theme : null)
+        })
+        return async () => { stopTheme(); style.remove(); await owned.dispose(); listeners.clear() }
       }, 'web-aichat: browser guests')
       ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
-        name: 'sidebar.panellist', id: PANEL, order: -1, label: () => 'AI 官网',
+        name: 'sidebar.panellist', id: PANEL, order: -1, label: () => 'AI Chat',
       }, Icon))
       ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: PANEL }, Panel))
     }

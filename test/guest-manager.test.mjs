@@ -134,3 +134,33 @@ test('missing Desktop bridge reports unavailable without trying iframe fallback'
   assert.equal(await manager.ensure(DEFAULT_PROVIDERS[0]), null)
   await manager.dispose()
 })
+
+test('guest palette updates serialize, keep the latest skin, and remove styles when switched off', async () => {
+  const { manager } = fixture()
+  const a = await manager.ensure(DEFAULT_PROVIDERS[0])
+  const inserted = [], removed = []
+  const gate = deferred()
+  a.element.executeJavaScript = async source => !/, false\)$/.test(source)
+  a.element.insertCSS = async css => {
+    const key = `css-${inserted.length}`
+    inserted.push(css)
+    if (inserted.length === 1) await gate.promise
+    return key
+  }
+  a.element.removeInsertedCSS = async key => { removed.push(key) }
+  const first = { scheme: 'light', background: 'rgb(250, 240, 230)' }
+  const second = { scheme: 'dark', background: 'rgb(10, 20, 30)' }
+  manager.setTheme(first)
+  a.element.fire('dom-ready')
+  await new Promise(resolve => setImmediate(resolve))
+  manager.setTheme(second)
+  gate.resolve()
+  await a.themeTask
+  assert.match(inserted.at(-1), /rgb\(10, 20, 30\)/)
+  assert.deepEqual(removed, ['css-0'])
+  manager.setTheme(null)
+  await a.themeTask
+  assert.deepEqual(removed, ['css-0', 'css-1'])
+  assert.equal(a.cssKey, null)
+  await manager.dispose()
+})

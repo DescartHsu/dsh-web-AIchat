@@ -67,6 +67,7 @@ test('built client registers sidebar and main slots; UI switches, hides and rest
   const click = async element => { assert.ok(element); await act(async () => element.click()) }
   try {
     assert.equal(slots.find(slot => slot.name === 'sidebar.panellist').id, 'web-aichat')
+    assert.equal(slots.find(slot => slot.name === 'sidebar.panellist').label(), 'AI Chat')
     assert.equal(doc.querySelectorAll('[role=tab]').length, 8)
     const deepseek = guest('deepseek')
     assert.ok(deepseek)
