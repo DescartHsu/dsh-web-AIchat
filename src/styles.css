@@ -6,7 +6,7 @@
   --aic-selected:var(--dsw-alias-state-business-tertiary, color-mix(in srgb, var(--aic-accent) 12%, transparent));
   --aic-hover:var(--dsw-alias-interactive-bg-hover, color-mix(in srgb, currentColor 7%, transparent));
   display:flex; flex-direction:column; height:100%; min-height:0; min-width:0;
-  background-color:var(--dsw-alias-bg-base, transparent);
+  background-color:transparent;
   color:var(--dsw-alias-label-primary, inherit); font:inherit;
 }
 .aic-panel * { box-sizing:border-box; }

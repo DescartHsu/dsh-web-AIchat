@@ -102,8 +102,8 @@ export function createGuestManager({ bridge, document, onChange = () => {} }) {
         const container = document.createElement('div')
         entry = { element, container, lease, listeners: [], ready: false, origin: new URL(url).origin }
         container.setAttribute('data-dsh-web-aichat', provider.id)
-        Object.assign(container.style, { position: 'fixed', display: 'none', zIndex: '20' })
-        Object.assign(element.style, { width: '100%', height: '100%', display: 'flex', border: '0' })
+        Object.assign(container.style, { position: 'fixed', display: 'none', zIndex: '20', backgroundColor: 'transparent' })
+        Object.assign(element.style, { width: '100%', height: '100%', display: 'flex', border: '0', backgroundColor: 'transparent' })
         for (const [key, value] of Object.entries({ name: lease, partition: reservation.partition,
           allowpopups: '', 'data-sidebar-browser-frame': '', src: `about:blank#${lease}` })) {
           element.setAttribute(key, value)

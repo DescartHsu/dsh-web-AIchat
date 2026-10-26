@@ -15,12 +15,11 @@ export function readHostTheme(document) {
     const rgb = parseColor(value) || parseColor(fallback) || [20, 20, 20]
     return `rgb(${rgb.slice(0, 3).map(Math.round).join(', ')})`
   }
-  const base = scheme === 'dark' ? 'rgb(24, 24, 28)' : 'rgb(255, 255, 255)'
   const theme = {
     scheme,
-    // Webviews cannot show the host's wallpaper; use the skin's opaque palette.
-    background: opaque(color('--dsw-alias-bg-base', base), base),
-    surface: opaque(color('--dsw-alias-bg-layer-1', base), base),
+    // Let Desktop composite the guest over the host's skin and wallpaper.
+    background: 'transparent',
+    surface: 'transparent',
     foreground: opaque(foreground, scheme === 'dark' ? 'rgb(240, 240, 240)' : 'rgb(20, 20, 20)'),
     muted: opaque(color('--dsw-alias-label-secondary', foreground), foreground),
     border: color('--dsw-alias-border-l2', scheme === 'dark' ? 'rgb(70, 70, 75)' : 'rgb(210, 210, 215)'),
