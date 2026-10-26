@@ -95,7 +95,7 @@ export function installGuestTheme(expectedOrigin, enabled = true) {
     return false
   }
   const eligible = () => location.origin === expectedOrigin
-    && !/(?:^|\/)(?:login|log-in|signin|sign-in|auth|oauth|captcha|challenge|verify)(?:\/|$)/i.test(location.pathname)
+    && !/(?:^|\/)(?:(?:log|sign)[-_]?in|sign[-_]?up|auth|oauth|captcha|challenge|verify)(?:\/|$)/i.test(location.pathname)
   const enable = () => {
     if (eligible()) root.setAttribute('data-dsh-aichat-themed', '')
     else root.removeAttribute('data-dsh-aichat-themed')

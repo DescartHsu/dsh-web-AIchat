@@ -2,7 +2,7 @@
 
 DeepSeek Harness 插件：左侧栏一个「AI Chat」入口，主区域顶部切换不同 AI 的官网聊天页面。
 
-**当前版本：0.1.2，开发预览。** 使用各网站自己的账号与网页，不需要配置模型 API Key，不会把问题同时发送给多个模型。
+**当前版本：0.1.3，开发预览。** 使用各网站自己的账号与网页，不需要配置模型 API Key，不会把问题同时发送给多个模型。
 
 ## 功能
 
@@ -12,6 +12,7 @@ DeepSeek Harness 插件：左侧栏一个「AI Chat」入口，主区域顶部�
 - 后退、前进、刷新、返回首页、复制网址、重新打开当前页面。
 - 「管理网站」可添加 HTTPS 网站、移除自定义入口；保存入口与上次选择。
 - 每个网站使用独立的原生网页容器和存储分区。
+- 配套桌面修复可将 AI Chat 分区改为持久化存储，保留 Cookie（含 HttpOnly）、localStorage 和 IndexedDB；面板会显示当前环境是否支持登录保留。
 - 网页请求打开新窗口时显示链接，由用户选择是否在当前页打开。
 - 插件面板及官网内部的中性背景、常见内容区和输入框背景透明，透出宿主皮肤和背景。
 - 网页文字、边框、标签选中态和按钮使用 DSH 皮肤变量，跟随宿主主题即时变化；动态添加的网页内容也会自动适配。
@@ -21,7 +22,9 @@ DeepSeek Harness 插件：左侧栏一个「AI Chat」入口，主区域顶部�
 
 需要提供 `dshDesktop.protocolVersion === 1` 和 `dshDesktop.browser` 的官方 **DSH Desktop**。接口按本机 `0.2.1-rc.3` 和官方 Desktop Browser guest 协议实现。普通浏览器版 DSH 只能选择网站和复制网址，不会尝试 iframe 嵌入。
 
-页面保留限于当前桌面应用进程。官方分区是进程内存分区，**重启 DSH 后可能需要重新登录**。本版本不读取、导出或复制官网 Cookie、localStorage 或登录令牌，也不复用参考插件的登录快照。
+原版 DSH Desktop 0.2.1-rc.3 将 Browser guest 强制放在内存分区，单独安装插件无法解决重启后退出登录。0.1.3 附带针对该版本的本地兼容修复，只将 `dsh-web-aichat:<网站标识>` 分区改成稳定的 `persist:` 分区；其他浏览器分区及宿主隔离策略不变。网站通过 Chromium 原生存储保留登录数据，插件不导出、复制或回放登录令牌。
+
+修复应用后需在各官网重新登录一次；原临时分区已丢失的登录数据无法恢复。之后正常退出再打开 DSH，仍在官网有效期内的登录状态会保留。网站主动退出、Cookie 过期、关闭即失效的会话 Cookie 或安全验证仍可能要求重新登录，无法保证永久在线。
 
 网页内部的配色使用通用样式适配，保留品牌色、图片、代码区、验证码区域和第三方 iframe。登录跳转及其他域名不应用配色。透明部分由 Electron 网页容器与宿主背景合成，不复制或读取壁纸文件。少数使用 Shadow DOM、复杂渐变或特殊布局的区域可能保留官网配色，可切换「官网原色」。
 
@@ -30,6 +33,8 @@ DeepSeek Harness 插件：左侧栏一个「AI Chat」入口，主区域顶部�
 本版本已通过构建与自动化测试；**尚未在实际 DSH 内逐站验证登录与聊天**。这里列出的入口不代表各网站的所有功能均已验证可用。
 
 0.1.2 已在独立 Electron 44.7.0 测试容器中验证透明合成：截图像素确认宿主深浅背景可穿透网页及输入区，文字跟随配色变化；新增内容、官网原色恢复及未发送草稿保留也通过。
+
+0.1.3 已使用修复后的真实 DesktopBrowserGuests 实现，分别启动两个 Electron 44.7.0 进程，验证持久化 HttpOnly Cookie、localStorage、IndexedDB 跨重启保留和不同网站分区隔离。测试未延长官网会话有效期，未使用实际账号凭据。
 
 ## 安装
 
@@ -41,7 +46,24 @@ pnpm test
 pnpm pack
 ```
 
-在 DSH Desktop 的「插件 → 添加插件」中输入生成的 `dsh-web-aichat-0.1.2.tgz` **绝对路径**，按宿主提示启用或重启。之后点击左侧「AI Chat」。也可以输入已构建项目的绝对目录。
+在 DSH Desktop 的「插件 → 添加插件」中输入生成的 `dsh-web-aichat-0.1.3.tgz` **绝对路径**，按宿主提示启用或重启。之后点击左侧「AI Chat」。也可以输入已构建项目的绝对目录。
+
+### 登录保留的配套桌面修复
+
+以下工具仅支持 Windows 官方 DSH Desktop 0.2.1-rc.3。先完整退出 DSH（包括托盘），然后运行：
+
+```sh
+node scripts/desktop-persistence.mjs --check "E:/DeepSeek Harness"
+node scripts/desktop-persistence.mjs --apply "E:/DeepSeek Harness"
+```
+
+工具先验证安装版本和补丁位置，备份 `resources/app.asar` 并校验备份，再替换该文件中的分区选择逻辑；不改可执行程序、不调整 Electron fuses、不关闭完整性检查。未知版本或启用嵌入式 ASAR 校验的构建会拒绝修改。输出包含备份路径，回滚时完整退出 DSH 后使用：
+
+```sh
+node scripts/desktop-persistence.mjs --restore "E:/DeepSeek Harness" "工具输出的完整备份路径"
+```
+
+安装包内也包含此脚本，Release 提供独立副本。DSH 自身升级可能覆盖兼容修复；若面板重新提示使用临时存储，请先检查新宿主支持情况，勿将旧补丁强行套用到未知版本。
 
 仓库名按项目要求使用 `dsh-web-AIchat`；npm 包名按命名规则使用小写 `dsh-web-aichat`。仓库与包均按私有开发设置，未发布到 npm。不要将私有 GitHub 链接当成已发布的 npm 安装包。
 

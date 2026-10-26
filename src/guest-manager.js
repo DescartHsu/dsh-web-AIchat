@@ -98,6 +98,7 @@ export function createGuestManager({ bridge, document, onChange = () => {} }) {
         const reservation = await bridge.acquire(`dsh-web-aichat:${provider.id}`)
         lease = reservation.lease
         if (disposed || cancelled.has(token)) { await release(lease); return null }
+        notify(provider.id, { persistent: reservation.partition.startsWith('persist:') })
         const element = document.createElement('webview')
         const container = document.createElement('div')
         entry = { element, container, lease, listeners: [], ready: false, origin: new URL(url).origin }

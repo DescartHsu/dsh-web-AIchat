@@ -59,7 +59,7 @@ test('disabling guest theme cancels pending work and does not change input or ac
 })
 
 test('guest styling does not activate on another origin or login routes, and pauses for SPA login navigation', async () => {
-  for (const url of ['https://accounts.example.com/', 'https://chat.example.com/login', 'https://chat.example.com/auth/callback']) {
+  for (const url of ['https://accounts.example.com/', 'https://chat.example.com/login', 'https://chat.example.com/sign_in', 'https://chat.example.com/sign_up', 'https://chat.example.com/auth/callback']) {
     const { dom, apply, doc } = page(url)
     assert.equal(apply(true), false)
     assert.equal(doc.documentElement.hasAttribute('data-dsh-aichat-themed'), false)

@@ -145,7 +145,8 @@ window.__ModuleLoader__.load({
               onClick: () => save({ ...config, followTheme: !config.followTheme }) }, config.followTheme ? '跟随皮肤' : '官网原色'),
             button('重新打开', '关闭并重新创建当前网页', () => void reopen(), !manager.available || reopening)),
           h('div', { className: `aic-status${state.error ? ' aic-error' : ''}`, role: state.error ? 'alert' : 'status', 'aria-live': 'polite' },
-            state.error || state.themeError || (reopening ? '正在重新打开…' : state.loading ? `正在加载 ${current.name}…` : notice || storageNotice || '切换 AI 或离开面板时保留页面 · 登录由官网处理')),
+            state.error || state.themeError || (reopening ? '正在重新打开…' : state.loading ? `正在加载 ${current.name}…` : notice || storageNotice ||
+              (state.persistent ? '登录状态自动保留 · 官网过期或要求验证时需重新登录' : '当前桌面环境使用临时登录存储，重启会退出；需应用配套桌面修复'))),
           state.popup ? h('div', { className: 'aic-popup' },
             h('span', null, '官网请求打开：', h('code', null, state.popup)),
             button('在当前页打开', '在当前页打开该链接', () => void manager.navigate(current.id, 'url', state.popup)),
