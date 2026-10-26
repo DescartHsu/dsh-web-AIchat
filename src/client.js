@@ -1,4 +1,4 @@
-import { DEFAULT_PROVIDERS, readConfig, writeConfig, validateCustomProvider } from './providers.js'
+import { DEFAULT_PROVIDERS, readConfig, writeConfig, validateCustomProvider, normalizeConfig, orderedProviders, moveProvider } from './providers.js'
 import { createGuestManager } from './guest-manager.js'
 import css from './styles.css'
 import { watchHostTheme } from './theme.js'
@@ -15,12 +15,13 @@ window.__ModuleLoader__.load({
     let manager
     let storageNotice = ''
     let hostTheme = null
-    const providers = () => [...DEFAULT_PROVIDERS, ...config.custom]
+    const providers = () => orderedProviders(config)
     function save(next) {
-      config = next
+      config = normalizeConfig(next)
       manager?.setTheme(config.followTheme ? hostTheme : null)
       storageNotice = writeConfig(localStorage, config) ? '' : '当前选择可用，但浏览器设置阻止了偏好保存。'
       notify()
+      return !storageNotice
     }
     function select(id) { save({ ...config, selected: id }) }
     async function persistenceRequest(action) {
@@ -126,6 +127,15 @@ window.__ModuleLoader__.load({
       const [epoch, setEpoch] = React.useState(0)
       const [notice, setNotice] = React.useState('')
       const [setupInfo, setSetupInfo] = React.useState(null)
+      const [dragId, setDragId] = React.useState(null)
+      const [dropTarget, setDropTarget] = React.useState(null)
+      const dragged = React.useRef(null)
+      const keyboardFocus = React.useRef(null)
+      React.useLayoutEffect(() => {
+        if (!keyboardFocus.current) return
+        document.getElementById(`aic-tab-${keyboardFocus.current}`)?.focus()
+        keyboardFocus.current = null
+      })
       const hostRef = React.useRef(null)
       const current = providers().find(item => item.id === config.selected) || DEFAULT_PROVIDERS[0]
       const state = manager.status(current.id)
@@ -174,6 +184,12 @@ window.__ModuleLoader__.load({
       const switchTab = (event, id) => {
         const all = providers()
         let index = all.findIndex(item => item.id === id)
+        if (event.altKey && ['ArrowLeft', 'ArrowRight'].includes(event.key)) {
+          event.preventDefault(); event.stopPropagation()
+          const target = all[index + (event.key === 'ArrowLeft' ? -1 : 1)]
+          if (target) { keyboardFocus.current = id; reorder(id, target.id, event.key === 'ArrowLeft' ? 'before' : 'after') }
+          return
+        }
         if (event.key === 'ArrowRight') index = (index + 1) % all.length
         else if (event.key === 'ArrowLeft') index = (index + all.length - 1) % all.length
         else if (event.key === 'Home') index = 0
@@ -183,6 +199,35 @@ window.__ModuleLoader__.load({
         select(all[index].id)
         document.getElementById(`aic-tab-${all[index].id}`)?.focus()
       }
+      const reorder = (source, target, position) => {
+        const next = moveProvider(config, source, target, position)
+        if (next.order.join(',') === config.order.join(',')) return
+        const name = providers().find(item => item.id === source)?.name
+        const saved = save(next)
+        setNotice(saved ? `已将 ${name} 移到第 ${next.order.indexOf(source) + 1} 位，顺序已保存。` : '')
+      }
+      const endDrag = () => { dragged.current = null; setDragId(null); setDropTarget(null) }
+      const dropPosition = event => {
+        const rect = event.currentTarget.getBoundingClientRect()
+        return event.clientX < rect.left + rect.width / 2 ? 'before' : 'after'
+      }
+      const dragOver = (event, id) => {
+        if (!dragged.current) return
+        if (dragged.current === id) { setDropTarget(null); return }
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'move'
+        const position = dropPosition(event)
+        setDropTarget(previous => previous?.id === id && previous.position === position ? previous : { id, position })
+      }
+      const scrollDrag = event => {
+        if (!dragged.current) return
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'move'
+        const nav = event.currentTarget, rect = nav.getBoundingClientRect()
+        if (rect.right <= rect.left) return
+        if (event.clientX < rect.left + 36) nav.scrollLeft -= 20
+        else if (event.clientX > rect.right - 36) nav.scrollLeft += 20
+      }
       const button = (label, title, action, disabled = !state.ready) => h('button', {
         type: 'button', className: 'aic-button', title, 'aria-label': title, onClick: action, disabled,
       }, label)
@@ -190,12 +235,29 @@ window.__ModuleLoader__.load({
         h('header', { className: 'aic-header' },
           h('div', { className: 'aic-brand' }, h(Icon, { size: 24 }), h('div', null, h('h1', null, 'AI Chat'), h('p', null, '常用 AI 官网，一个入口'))),
           h('button', { className: 'aic-button', disabled: reopening, onClick: () => { setLoginSetup(false); setSettings(value => !value) }, 'aria-expanded': settings }, settings ? '返回聊天' : '管理网站')),
-        h('nav', { className: 'aic-tabs', role: 'tablist', 'aria-label': 'AI Chat' },
+        h('nav', { className: 'aic-tabs', role: 'tablist', 'aria-label': 'AI Chat', onDragOver: scrollDrag,
+          onDrop: event => { if (dragged.current) { event.preventDefault(); endDrag() } },
+          onDragLeave: event => { if (!event.currentTarget.contains(event.relatedTarget)) setDropTarget(null) } },
           providers().map(item => h('button', { id: `aic-tab-${item.id}`, key: item.id, role: 'tab',
             className: 'aic-tab', type: 'button', disabled: reopening, 'aria-selected': current.id === item.id,
+            draggable: !reopening, title: '拖动调整顺序；Alt + ← / → 移动标签',
+            'aria-describedby': 'aic-sort-help', 'aria-keyshortcuts': 'Alt+ArrowLeft Alt+ArrowRight',
+            'data-dragging': dragId === item.id ? 'true' : undefined,
+            'data-drop': dropTarget?.id === item.id ? dropTarget.position : undefined,
+            onDragStart: event => {
+              dragged.current = item.id; setDragId(item.id); setDropTarget(null)
+              event.dataTransfer.effectAllowed = 'move'
+              event.dataTransfer.setData('text/plain', item.id)
+            }, onDragEnd: endDrag, onDragOver: event => dragOver(event, item.id),
+            onDrop: event => {
+              if (!dragged.current) return
+              event.preventDefault(); event.stopPropagation()
+              reorder(dragged.current, item.id, dropPosition(event)); endDrag()
+            },
             'aria-controls': 'aic-content', tabIndex: current.id === item.id ? 0 : -1,
             onKeyDown: event => switchTab(event, item.id), onClick: () => { select(item.id); setSettings(false); setLoginSetup(false); setNotice('') } },
           h('span', { className: 'aic-dot', style: { background: item.color } }), item.name))),
+        h('p', { id: 'aic-sort-help', className: 'aic-sr-only' }, '拖动标签调整顺序并自动保存，也可按 Alt 加左右方向键移动当前标签。'),
         loginSetup ? h(PersistenceSetup, { onDone: () => setLoginSetup(false) }) : settings ? h(WebsiteSettings, { onDone: () => setSettings(false) }) : h(React.Fragment, null,
           h('div', { className: 'aic-toolbar' },
             button('←', '后退', () => void manager.navigate(current.id, 'back')),

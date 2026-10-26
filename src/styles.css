@@ -15,7 +15,13 @@
 .aic-brand h1 { font-size:20px; font-weight:650; letter-spacing:-.5px; margin:0; line-height:1.3; }
 .aic-brand p { margin:3px 0 0; font-size:12px; color:var(--aic-subtle); }
 .aic-tabs { display:flex; flex:none; gap:6px; overflow-x:auto; padding:8px 20px 14px; border-bottom:1px solid var(--aic-border); }
-.aic-tab { display:flex; align-items:center; gap:8px; white-space:nowrap; padding:9px 14px; border:1px solid transparent; border-radius:9px; background:transparent; color:inherit; font:inherit; font-size:13px; cursor:pointer; }
+.aic-tab { display:flex; position:relative; flex-shrink:0; align-items:center; gap:8px; white-space:nowrap; padding:9px 14px; border:1px solid transparent; border-radius:9px; background:transparent; color:inherit; font:inherit; font-size:13px; cursor:pointer; }
+.aic-tab[draggable=true] { cursor:grab; user-select:none; }
+.aic-tab[data-dragging=true] { opacity:.45; cursor:grabbing; }
+.aic-tab[data-drop=before]::before,.aic-tab[data-drop=after]::after { content:''; position:absolute; top:4px; bottom:4px; width:3px; border-radius:2px; background:var(--aic-accent); pointer-events:none; }
+.aic-tab[data-drop=before]::before { left:-4px; }
+.aic-tab[data-drop=after]::after { right:-4px; }
+.aic-sr-only { position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden; clip-path:inset(50%); white-space:nowrap; border:0; }
 .aic-tab:hover { background:var(--aic-hover); }
 .aic-tab[aria-selected=true] { background:var(--aic-selected); color:var(--aic-accent); border-color:color-mix(in srgb, var(--aic-accent) 30%, transparent); font-weight:650; }
 .aic-dot { height:8px; width:8px; border-radius:50%; flex:none; }

@@ -40,7 +40,30 @@ export function normalizeConfig(value) {
       } catch { /* Ignore malformed stored entries, keeping the usable ones. */ }
     }
   }
-  return { version: 1, custom, selected: ids.has(value?.selected) ? value.selected : 'deepseek', followTheme: value?.followTheme !== false }
+  const order = []
+  if (value?.version === 1 && Array.isArray(value.order)) {
+    for (const id of value.order.slice(0, 256)) if (ids.has(id) && !order.includes(id)) order.push(id)
+  }
+  for (const id of ids) if (!order.includes(id)) order.push(id)
+  return { version: 1, custom, order, selected: ids.has(value?.selected) ? value.selected : 'deepseek', followTheme: value?.followTheme !== false }
+}
+
+export function orderedProviders(config) {
+  const remaining = new Map([...DEFAULT_PROVIDERS, ...config.custom].map(provider => [provider.id, provider]))
+  const providers = []
+  for (const id of config.order) {
+    if (remaining.has(id)) { providers.push(remaining.get(id)); remaining.delete(id) }
+  }
+  return [...providers, ...remaining.values()]
+}
+
+export function moveProvider(config, sourceId, targetId, position = 'before') {
+  const next = normalizeConfig(config)
+  if (sourceId === targetId || !next.order.includes(sourceId) || !next.order.includes(targetId)
+    || !['before', 'after'].includes(position)) return next
+  next.order = next.order.filter(id => id !== sourceId)
+  next.order.splice(next.order.indexOf(targetId) + (position === 'after' ? 1 : 0), 0, sourceId)
+  return next
 }
 
 export function readConfig(storage) {

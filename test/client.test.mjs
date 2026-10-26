@@ -4,10 +4,11 @@ import { readFile } from 'node:fs/promises'
 import { JSDOM } from 'jsdom'
 import React, { act } from 'react'
 
-async function boot(desktop = true, fetchImplementation, persistent = true) {
+async function boot(desktop = true, fetchImplementation, persistent = true, initialConfig) {
   const dom = new JSDOM('<!doctype html><html><head></head><body><div id="root"></div></body></html>',
     { url: 'https://dsh.test/', runScripts: 'outside-only' })
   const { window } = dom
+  if (initialConfig) window.localStorage.setItem('dsh-web-aichat:config:v1', JSON.stringify(initialConfig))
   if (fetchImplementation) window.fetch = fetchImplementation
   const previous = new Map()
   for (const [key, value] of Object.entries({ window, document: window.document,
@@ -159,5 +160,83 @@ test('fresh desktop setup needs no repair click and does not open a temporary lo
     assert.equal([...doc.querySelectorAll('button')].some(item => /启用登录保留|准备修复|重试自动设置/.test(item.textContent)), false)
     assert.equal(calls.filter(call => call.url.endsWith('/prepare')).length, 0)
     assert.doesNotMatch(doc.body.textContent, /登录状态自动保留/)
+  } finally { await fixture.finish() }
+})
+
+test('dragging tabs reorders built-in and custom sites, persists across reload, and preserves active chat guests', async () => {
+  const fixture = await boot(true, undefined, true, { version: 1, custom: [
+    { id: 'custom-example', name: 'Example', url: 'https://example.com/' },
+  ] })
+  let saved
+  try {
+    const { window } = fixture, doc = window.document
+    const tab = id => doc.getElementById(`aic-tab-${id}`)
+    const order = () => [...doc.querySelectorAll('[role=tab]')].map(element => element.id.replace('aic-tab-', ''))
+    const transfer = { effectAllowed: '', dropEffect: '', setData() {} }
+    const drag = async (type, element, x = 110) => {
+      const event = new window.MouseEvent(type, { bubbles: true, cancelable: true, clientX: x })
+      Object.defineProperty(event, 'dataTransfer', { value: transfer })
+      await act(async () => element.dispatchEvent(event))
+    }
+    const deepseek = doc.querySelector('[data-dsh-web-aichat=deepseek]')
+    await act(async () => deepseek.firstChild.dispatchEvent(new window.Event('dom-ready')))
+    deepseek.firstChild.draft = 'unsent draft'
+    await act(async () => tab('chatgpt').click())
+    const chatgpt = doc.querySelector('[data-dsh-web-aichat=chatgpt]')
+    const original = order()
+    tab('deepseek').getBoundingClientRect = () => ({ left: 100, width: 100, right: 200 })
+    // An external drag cannot reorder tabs, even with a matching text payload.
+    await drag('drop', tab('deepseek'))
+    assert.deepEqual(order(), original)
+    await drag('dragstart', tab('custom-example'))
+    await drag('dragover', tab('deepseek'))
+    assert.equal(tab('deepseek').dataset.drop, 'before')
+    const nav = doc.querySelector('[role=tablist]')
+    nav.getBoundingClientRect = () => ({ left: 0, right: 800 })
+    await drag('dragover', nav, 790)
+    assert.equal(nav.scrollLeft, 20)
+    await drag('drop', tab('deepseek'))
+    assert.equal(order()[0], 'custom-example')
+    assert.equal(doc.querySelector('[data-dragging=true], [data-drop]'), null)
+    tab('gemini').getBoundingClientRect = () => ({ left: 100, width: 100, right: 200 })
+    await drag('dragstart', tab('deepseek'))
+    await drag('dragover', tab('gemini'), 190)
+    assert.equal(tab('gemini').dataset.drop, 'after')
+    await drag('drop', tab('gemini'), 190)
+    assert.deepEqual(order().slice(0, 5), ['custom-example', 'chatgpt', 'claude', 'gemini', 'deepseek'])
+    const completed = order()
+    await drag('dragstart', tab('grok'))
+    await drag('dragover', tab('deepseek'))
+    await drag('dragend', tab('grok'))
+    assert.deepEqual(order(), completed)
+    assert.equal(tab('chatgpt').getAttribute('aria-selected'), 'true')
+    assert.equal(doc.querySelector('[data-dsh-web-aichat=deepseek]'), deepseek)
+    assert.equal(doc.querySelector('[data-dsh-web-aichat=chatgpt]'), chatgpt)
+    assert.equal(deepseek.firstChild.loads.length, 1); assert.equal(deepseek.firstChild.draft, 'unsent draft')
+    assert.equal(fixture.released.length, 0)
+    saved = JSON.parse(window.localStorage.getItem('dsh-web-aichat:config:v1'))
+    assert.deepEqual(saved.order, completed); assert.equal(saved.selected, 'chatgpt')
+  } finally { await fixture.finish() }
+  const restored = await boot(true, undefined, true, saved)
+  try {
+    assert.deepEqual([...restored.window.document.querySelectorAll('[role=tab]')].map(element => element.id.replace('aic-tab-', '')), saved.order)
+    assert.equal(restored.window.document.getElementById('aic-tab-chatgpt').getAttribute('aria-selected'), 'true')
+  } finally { await restored.finish() }
+})
+
+test('Alt+arrow moves a focused tab without switching chats and plain arrows follow the new order', async () => {
+  const fixture = await boot(true, undefined, true, { version: 1, selected: 'chatgpt' })
+  try {
+    const { window } = fixture, doc = window.document
+    const tab = doc.getElementById('aic-tab-chatgpt')
+    tab.focus()
+    const key = async (key, altKey = false) => {
+      await act(async () => tab.dispatchEvent(new window.KeyboardEvent('keydown', { key, altKey, bubbles: true, cancelable: true })))
+    }
+    await key('ArrowRight', true)
+    assert.deepEqual([...doc.querySelectorAll('[role=tab]')].slice(0, 3).map(element => element.textContent), ['DeepSeek', 'Claude', 'ChatGPT'])
+    assert.equal(tab.getAttribute('aria-selected'), 'true'); assert.equal(doc.activeElement, tab)
+    await key('ArrowLeft')
+    assert.equal(doc.getElementById('aic-tab-claude').getAttribute('aria-selected'), 'true')
   } finally { await fixture.finish() }
 })
