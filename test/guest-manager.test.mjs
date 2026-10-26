@@ -164,3 +164,25 @@ test('guest palette updates serialize, keep the latest skin, and remove styles w
   assert.equal(a.cssKey, null)
   await manager.dispose()
 })
+
+test('DeepSeek notice handling runs without theme sync and is not injected into other providers', async () => {
+  const { manager } = fixture()
+  const deepseek = await manager.ensure(DEFAULT_PROVIDERS[0])
+  const chatgpt = await manager.ensure(DEFAULT_PROVIDERS[1])
+  const deepseekCalls = [], otherCalls = []
+  deepseek.element.executeJavaScript = async code => { deepseekCalls.push(code) }
+  chatgpt.element.executeJavaScript = async code => { otherCalls.push(code) }
+  deepseek.element.fire('dom-ready')
+  chatgpt.element.fire('dom-ready')
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(deepseekCalls.length, 1)
+  assert.match(deepseekCalls[0], /installDeepseekNoticeDismissal/)
+  assert.equal(otherCalls.length, 0)
+  deepseek.element.fire('did-finish-load')
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(deepseekCalls.length, 2)
+  await manager.dispose()
+  deepseek.element.fire('dom-ready')
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(deepseekCalls.length, 2)
+})

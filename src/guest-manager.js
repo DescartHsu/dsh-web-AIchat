@@ -1,5 +1,6 @@
 import { safeWebUrl } from './providers.js'
 import { guestThemeCSS, installGuestTheme } from './theme.js'
+import { installDeepseekNoticeDismissal } from './deepseek-notice.js'
 
 /** Owns leases independently of React mounts, so switching panels preserves pages. */
 export function createGuestManager({ bridge, document, onChange = () => {} }) {
@@ -42,6 +43,14 @@ export function createGuestManager({ bridge, document, onChange = () => {} }) {
     }
   }
   function show(id, host) { visibleId = id; viewport = host; reposition() }
+  function installSiteCompatibility(entry) {
+    if (entry.origin !== 'https://chat.deepseek.com' || disposed || entry.closed
+      || typeof entry.element.executeJavaScript !== 'function') return
+    // Runs independently of theme synchronization, including on sign-in pages.
+    Promise.resolve().then(() => {
+      if (!disposed && !entry.closed) return entry.element.executeJavaScript(`(${installDeepseekNoticeDismissal.toString()})()`)
+    }).catch(() => { /* A navigation may replace the document; the next load retries. */ })
+  }
   function syncTheme(id, entry) {
     entry.themeRevision = (entry.themeRevision || 0) + 1
     if (entry.themeTask || !entry.ready || typeof entry.element.executeJavaScript !== 'function'
@@ -125,7 +134,9 @@ export function createGuestManager({ bridge, document, onChange = () => {} }) {
           // Each new document needs its own stylesheet, even if the palette is unchanged.
           entry.cssKey = null
           syncTheme(provider.id, entry)
+          installSiteCompatibility(entry)
         })
+        listen('did-finish-load', () => installSiteCompatibility(entry))
         listen('did-start-loading', () => notify(provider.id, { loading: true, error: '' }))
         listen('did-stop-loading', () => notify(provider.id, { loading: false }))
         listen('page-title-updated', event => notify(provider.id, { title: event.title || provider.name }))
