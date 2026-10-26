@@ -2,7 +2,7 @@
 
 DeepSeek Harness 插件：左侧栏一个「AI Chat」入口，主区域顶部切换不同 AI 的官网聊天页面。
 
-**当前版本：0.1.4，开发预览。** 使用各网站自己的账号与网页，不需要配置模型 API Key，不会把问题同时发送给多个模型。
+**当前版本：0.1.5，开发预览。** 使用各网站自己的账号与网页，不需要配置模型 API Key，不会把问题同时发送给多个模型。
 
 ## 功能
 
@@ -12,7 +12,7 @@ DeepSeek Harness 插件：左侧栏一个「AI Chat」入口，主区域顶部�
 - 后退、前进、刷新、返回首页、复制网址、重新打开当前页面。
 - 「管理网站」可添加 HTTPS 网站、移除自定义入口；保存入口与上次选择。
 - 每个网站使用独立的原生网页容器和存储分区。
-- 配套桌面修复可将 AI Chat 分区改为持久化存储，保留 Cookie（含 HttpOnly）、localStorage 和 IndexedDB；面板会显示当前环境是否支持登录保留。
+- 安装包内置「启用登录保留」入口：在 Windows DSH Desktop 0.2.1-rc.3 上准备修复，完整退出后自动备份、启用持久化存储并重新打开 DSH。保留 Cookie（含 HttpOnly）、localStorage 和 IndexedDB；面板按实际分区显示是否已启用。
 - 网页请求打开新窗口时显示链接，由用户选择是否在当前页打开。
 - 插件面板及官网内部的中性背景、常见内容区和输入框背景透明，透出宿主皮肤和背景。
 - 网页文字、边框、标签选中态和按钮使用 DSH 皮肤变量，跟随宿主主题即时变化；动态添加的网页内容也会自动适配。
@@ -23,7 +23,7 @@ DeepSeek Harness 插件：左侧栏一个「AI Chat」入口，主区域顶部�
 
 需要提供 `dshDesktop.protocolVersion === 1` 和 `dshDesktop.browser` 的官方 **DSH Desktop**。接口按本机 `0.2.1-rc.3` 和官方 Desktop Browser guest 协议实现。普通浏览器版 DSH 只能选择网站和复制网址，不会尝试 iframe 嵌入。
 
-原版 DSH Desktop 0.2.1-rc.3 将 Browser guest 强制放在内存分区，单独安装插件无法解决重启后退出登录。0.1.3 附带针对该版本的本地兼容修复，只将 `dsh-web-aichat:<网站标识>` 分区改成稳定的 `persist:` 分区；其他浏览器分区及宿主隔离策略不变。网站通过 Chromium 原生存储保留登录数据，插件不导出、复制或回放登录令牌。
+原版 DSH Desktop 0.2.1-rc.3 将 Browser guest 强制放在内存分区，仅更新网页代码无法解决重启后退出登录。0.1.5 将针对该版本的桌面兼容修复及执行工具完整包含在安装包中，支持在另一台电脑上直接准备修复；只将 `dsh-web-aichat:<网站标识>` 分区改成稳定的 `persist:` 分区。其他浏览器分区及宿主隔离策略不变。网站通过 Chromium 原生存储保留登录数据，插件不导出、复制或回放登录令牌。
 
 修复应用后需在各官网重新登录一次；原临时分区已丢失的登录数据无法恢复。之后正常退出再打开 DSH，仍在官网有效期内的登录状态会保留。网站主动退出、Cookie 过期、关闭即失效的会话 Cookie 或安全验证仍可能要求重新登录，无法保证永久在线。
 
@@ -39,6 +39,8 @@ DeepSeek Harness 插件：左侧栏一个「AI Chat」入口，主区域顶部�
 
 0.1.3 已使用修复后的真实 DesktopBrowserGuests 实现，分别启动两个 Electron 44.7.0 进程，验证持久化 HttpOnly Cookie、localStorage、IndexedDB 跨重启保留和不同网站分区隔离。测试未延长官网会话有效期，未使用实际账号凭据。
 
+0.1.5 已在独立的 Windows Electron 44.7.0 安装副本中验证完整流程：未修复安装的检测、安装包内工具准备、等待退出、备份和修复、自动重开，以及再次完整重启后的 HttpOnly Cookie、localStorage、IndexedDB 保留。该验证使用官方原始 DesktopBrowserGuests 代码和测试数据，不代表已验证其他电脑上的实际 DeepSeek 账号会话。
+
 ## 安装
 
 从本仓库构建本地安装包：
@@ -49,9 +51,20 @@ pnpm test
 pnpm pack
 ```
 
-在 DSH Desktop 的「插件 → 添加插件」中输入生成的 `dsh-web-aichat-0.1.4.tgz` **绝对路径**，按宿主提示启用或重启。之后点击左侧「AI Chat」。也可以输入已构建项目的绝对目录。
+在 DSH Desktop 的「插件 → 添加插件」中输入生成的 `dsh-web-aichat-0.1.5.tgz` **绝对路径**，按宿主提示启用或重启。之后点击左侧「AI Chat」。也可以输入已构建项目的绝对目录。
 
-### 登录保留的配套桌面修复
+### 在另一台电脑启用登录保留
+
+支持 Windows 官方 DSH Desktop 0.2.1-rc.3，无需单独下载脚本或安装 Node.js：
+
+1. 安装或更新插件后，完整退出并重新打开 DSH，让新版插件的桌面服务加载。
+2. 打开 **AI Chat → 启用登录保留 → 准备修复并在退出后自动重启**。页面会显示自动检测到的安装位置。
+3. 完成运行中的任务，从 DSH 的 **应用 → 退出** 完整退出（仅关闭窗口可能仍在托盘运行）。工具会自动备份、完成修复并重新打开 DSH；准备后需在 15 分钟内退出。
+4. 打开 AI Chat，确认底部显示 **登录状态自动保留**，在 DeepSeek 等官网重新登录一次，再正常退出和打开 DSH 检查。
+
+准备完成仅表示工具已就绪；只有实际网页使用持久化分区时，聊天区才显示登录已保留。失败、版本不兼容或安装目录不可写时会提供原因，不会显示为已启用。关闭修复页面或插件热重载不会中断已经准备的独立工具。
+
+### 手动修复与回滚
 
 以下工具仅支持 Windows 官方 DSH Desktop 0.2.1-rc.3。先完整退出 DSH（包括托盘），然后运行：
 
@@ -66,7 +79,7 @@ node scripts/desktop-persistence.mjs --apply "E:/DeepSeek Harness"
 node scripts/desktop-persistence.mjs --restore "E:/DeepSeek Harness" "工具输出的完整备份路径"
 ```
 
-安装包内也包含此脚本，Release 提供独立副本。DSH 自身升级可能覆盖兼容修复；若面板重新提示使用临时存储，请先检查新宿主支持情况，勿将旧补丁强行套用到未知版本。
+安装包内也包含此脚本，Release 提供独立副本作为手动备用方式。一键流程的任务及状态保存在 DSH 主目录的 `dsh-web-aichat/desktop-setup/`，备份位于原 `resources/app.asar` 旁。DSH 自身升级可能覆盖兼容修复；若面板重新提示使用临时存储，请先检查新宿主支持情况，勿将旧补丁强行套用到未知版本。
 
 仓库名按项目要求使用 `dsh-web-AIchat`；npm 包名按命名规则使用小写 `dsh-web-aichat`。仓库与包均按私有开发设置，未发布到 npm。不要将私有 GitHub 链接当成已发布的 npm 安装包。
 
@@ -87,11 +100,14 @@ pnpm pack
 | `src/guest-manager.js` | 原生网页租约、页面保留与释放 |
 | `src/providers.js` | 内置网站、配置与 URL 校验 |
 | `src/styles.css` | 面板样式 |
-| `src/index.js` | 无额外服务端路由的 Host 入口 |
+| `src/index.js` | Host 入口，注册登录修复服务 |
+| `src/persistence-service.js` | 检测安装位置、鉴权的本机准备接口、启动独立工具 |
+| `src/persistence-worker.mjs` | 等待完整退出、备份修复和重新打开桌面 |
+| `scripts/desktop-persistence.mjs` | 版本校验、限定分区修改和回滚 |
 | `cordis.patch.yml` | 插件包注册 |
 | `test/` | 生命周期、URL 校验、构建后 UI 集成测试 |
 
-自动化测试覆盖多个标签的独立分区、页面复用、迟到租约回收、加载失败重试、卸载清理、弹窗 URL 校验、侧栏与主区域注册，以及无 Desktop bridge 时的提示。测试使用模拟 bridge，不替代真实 Desktop 验收。
+自动化测试覆盖多个标签的独立分区、页面复用、迟到租约回收、加载失败重试、卸载清理、弹窗 URL 校验、侧栏与主区域注册，以及无 Desktop bridge 时的提示；还覆盖首次安装的启用入口、不同安装位置、完整打包工具、等待退出、失败与超时状态、接口鉴权。测试使用模拟 bridge，不替代真实 Desktop 验收。
 
 手动验收：在空闲的 DSH Desktop 中安装，逐个打开官网并手动登录；输入未发送的草稿后切换标签及其他 DSH 面板，确认页面保留；检查窄窗口布局、错误提示和插件禁用后的清理。请勿将实际聊天内容、登录信息或浏览器配置提交到仓库。
 

@@ -1,9 +1,16 @@
 /** Narrow, reversible compatibility repair for DSH Desktop 0.2.1-rc.3. */
-import { readFile, writeFile, copyFile, rename } from 'node:fs/promises'
+import * as nodeFiles from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import { createHash } from 'node:crypto'
 import { resolve, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { execFileSync } from 'node:child_process'
+
+// Electron treats app.asar as a virtual directory. Inspect/replace the physical
+// archive through original-fs; the bundled Node worker uses the normal API.
+export let nativeFileSystem = nodeFiles
+try { nativeFileSystem = createRequire(import.meta.url)('original-fs').promises } catch { /* Regular Node.js. */ }
+const { readFile, writeFile, copyFile, rename } = nativeFileSystem
 
 const MARKER = '/* dsh-web-aichat: persistent partitions v1 */'
 const sha256 = value => createHash('sha256').update(value).digest('hex')
@@ -99,8 +106,8 @@ function assertDesktopStopped(directory) {
   if (process.platform !== 'win32') return
   const executable = join(resolve(directory), 'DeepSeek Harness.exe')
   const output = execFileSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
-    'Get-CimInstance Win32_Process -Filter "Name=\'DeepSeek Harness.exe\'" | Where-Object { $_.ExecutablePath -eq $env:DSH_AICHAT_NATIVE_TARGET } | Select-Object -ExpandProperty ProcessId'],
-  { windowsHide: true, env: { ...process.env, DSH_AICHAT_NATIVE_TARGET: executable }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+    'Get-Process -Name "DeepSeek Harness" -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $env:DSH_AICHAT_NATIVE_TARGET -and $_.Id -ne [int]$env:DSH_AICHAT_REPAIR_PID } | Select-Object -ExpandProperty Id; exit 0'],
+  { windowsHide: true, env: { ...process.env, DSH_AICHAT_NATIVE_TARGET: executable, DSH_AICHAT_REPAIR_PID: String(process.pid) }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
   if (output.trim()) throw Error('Please fully quit DSH Desktop before applying or restoring this compatibility repair')
 }
 

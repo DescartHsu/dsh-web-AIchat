@@ -23,6 +23,54 @@ window.__ModuleLoader__.load({
       notify()
     }
     function select(id) { save({ ...config, selected: id }) }
+    async function persistenceRequest(action) {
+      const response = await fetch(`/api/web-aichat/persistence/${action}`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+      })
+      if (response.status === 404) throw Error('登录修复服务尚未加载，请完整退出并重新打开 DSH 后再试。')
+      const data = await response.json()
+      if (!response.ok || !data.ok) throw Error(data.error || '登录修复服务暂不可用。')
+      return data
+    }
+
+    function PersistenceSetup({ onDone }) {
+      const [info, setInfo] = React.useState(null)
+      const [error, setError] = React.useState('')
+      const [busy, setBusy] = React.useState(false)
+      React.useEffect(() => {
+        let alive = true
+        persistenceRequest('status').then(data => { if (alive) setInfo(data) }).catch(cause => { if (alive) setError(cause.message) })
+        return () => { alive = false }
+      }, [])
+      const waiting = ['queued', 'waiting', 'applying'].includes(info?.job?.state)
+      React.useEffect(() => {
+        if (!waiting) return
+        let alive = true
+        const timer = setInterval(() => {
+          persistenceRequest('status').then(data => { if (alive) setInfo(data) }).catch(cause => { if (alive) setError(cause.message) })
+        }, 2000)
+        return () => { alive = false; clearInterval(timer) }
+      }, [waiting])
+      const prepare = async () => {
+        setBusy(true); setError('')
+        try { setInfo(await persistenceRequest('prepare')) }
+        catch (cause) { setError(cause.message) }
+        finally { setBusy(false) }
+      }
+      return h('div', { className: 'aic-settings' },
+        h('div', { className: 'aic-settings-heading' }, h('h2', null, '启用重启后保留登录'),
+          h('button', { className: 'aic-button', onClick: onDone }, '返回聊天')),
+        h('p', null, '首次安装到这台电脑时，需要启用一次桌面登录存储。准备修复后，请完成运行中的任务，再从“应用 → 退出”完整退出 DSH（仅关闭窗口可能仍在托盘运行）。'),
+        h('p', null, '工具会自动备份、完成修复并重新打开 DSH，随后在各官网重新登录一次。登录仍受官网有效期和验证要求限制。'),
+        info?.installDirectory ? h('p', { className: 'aic-muted' }, '检测到安装位置：', h('code', null, info.installDirectory)) : null,
+        !info && !error ? h('p', { role: 'status' }, '正在检查当前桌面环境…') : null,
+        info && !info.supported ? h('p', { role: 'alert', className: 'aic-error' }, info.message) : null,
+        info?.onDiskEnabled ? h('p', null, '本机已准备好持久化存储。如聊天区仍提示临时存储，请完整退出并重新打开 DSH。') : null,
+        info?.job?.message ? h('p', { role: 'status' }, info.job.message) : null,
+        error ? h('p', { role: 'alert', className: 'aic-error' }, error) : null,
+        h('button', { type: 'button', className: 'aic-button aic-primary', disabled: !info?.supported || busy || waiting,
+          onClick: () => void prepare() }, waiting ? '已准备，等待完整退出 DSH' : busy ? '正在准备…' : '准备修复并在退出后自动重启'))
+    }
 
     function Icon({ size = 18 }) {
       return h('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none',
@@ -71,6 +119,7 @@ window.__ModuleLoader__.load({
     function Panel() {
       const [, rerender] = React.useReducer(value => value + 1, 0)
       const [settings, setSettings] = React.useState(false)
+      const [loginSetup, setLoginSetup] = React.useState(false)
       const [reopening, setReopening] = React.useState(false)
       const [epoch, setEpoch] = React.useState(0)
       const [notice, setNotice] = React.useState('')
@@ -80,7 +129,7 @@ window.__ModuleLoader__.load({
       React.useEffect(() => { listeners.add(rerender); rerender(); return () => listeners.delete(rerender) }, [])
       React.useEffect(() => {
         const host = hostRef.current
-        if (settings || reopening || !host) return
+        if (settings || loginSetup || reopening || !host) return
         let alive = true
         manager.show(current.id, host)
         void manager.ensure(current).then(() => { if (alive) manager.show(current.id, host) })
@@ -96,7 +145,7 @@ window.__ModuleLoader__.load({
           window.removeEventListener('scroll', position, true)
           manager.hide(host)
         }
-      }, [current.id, settings, reopening, epoch])
+      }, [current.id, settings, loginSetup, reopening, epoch])
       const reopen = async () => {
         setReopening(true)
         await manager.close(current.id)
@@ -125,14 +174,14 @@ window.__ModuleLoader__.load({
       return h('section', { className: 'aic-panel' },
         h('header', { className: 'aic-header' },
           h('div', { className: 'aic-brand' }, h(Icon, { size: 24 }), h('div', null, h('h1', null, 'AI Chat'), h('p', null, '常用 AI 官网，一个入口'))),
-          h('button', { className: 'aic-button', disabled: reopening, onClick: () => setSettings(value => !value), 'aria-expanded': settings }, settings ? '返回聊天' : '管理网站')),
+          h('button', { className: 'aic-button', disabled: reopening, onClick: () => { setLoginSetup(false); setSettings(value => !value) }, 'aria-expanded': settings }, settings ? '返回聊天' : '管理网站')),
         h('nav', { className: 'aic-tabs', role: 'tablist', 'aria-label': 'AI Chat' },
           providers().map(item => h('button', { id: `aic-tab-${item.id}`, key: item.id, role: 'tab',
             className: 'aic-tab', type: 'button', disabled: reopening, 'aria-selected': current.id === item.id,
             'aria-controls': 'aic-content', tabIndex: current.id === item.id ? 0 : -1,
-            onKeyDown: event => switchTab(event, item.id), onClick: () => { select(item.id); setSettings(false); setNotice('') } },
+            onKeyDown: event => switchTab(event, item.id), onClick: () => { select(item.id); setSettings(false); setLoginSetup(false); setNotice('') } },
           h('span', { className: 'aic-dot', style: { background: item.color } }), item.name))),
-        settings ? h(WebsiteSettings, { onDone: () => setSettings(false) }) : h(React.Fragment, null,
+        loginSetup ? h(PersistenceSetup, { onDone: () => setLoginSetup(false) }) : settings ? h(WebsiteSettings, { onDone: () => setSettings(false) }) : h(React.Fragment, null,
           h('div', { className: 'aic-toolbar' },
             button('←', '后退', () => void manager.navigate(current.id, 'back')),
             button('→', '前进', () => void manager.navigate(current.id, 'forward')),
@@ -140,13 +189,14 @@ window.__ModuleLoader__.load({
             button('刷新', '刷新当前网页', () => void manager.navigate(current.id, 'reload')),
             h('span', { className: 'aic-address', title: state.url || current.url }, state.url || current.url),
             button('复制地址', '复制当前网址', () => void copyUrl(), false),
+            manager.available && state.persistent === false ? button('启用登录保留', '为这台电脑启用重启后保留登录', () => setLoginSetup(true), false) : null,
             h('button', { type: 'button', className: 'aic-button', 'aria-pressed': config.followTheme,
               title: '同步官网内部配色；关闭可恢复官网原色',
               onClick: () => save({ ...config, followTheme: !config.followTheme }) }, config.followTheme ? '跟随皮肤' : '官网原色'),
             button('重新打开', '关闭并重新创建当前网页', () => void reopen(), !manager.available || reopening)),
           h('div', { className: `aic-status${state.error ? ' aic-error' : ''}`, role: state.error ? 'alert' : 'status', 'aria-live': 'polite' },
             state.error || state.themeError || (reopening ? '正在重新打开…' : state.loading ? `正在加载 ${current.name}…` : notice || storageNotice ||
-              (state.persistent ? '登录状态自动保留 · 官网过期或要求验证时需重新登录' : '当前桌面环境使用临时登录存储，重启会退出；需应用配套桌面修复'))),
+              (state.persistent ? '登录状态自动保留 · 官网过期或要求验证时需重新登录' : '这台电脑尚未启用登录保留，请点击上方“启用登录保留”完成设置'))),
           state.popup ? h('div', { className: 'aic-popup' },
             h('span', null, '官网请求打开：', h('code', null, state.popup)),
             button('在当前页打开', '在当前页打开该链接', () => void manager.navigate(current.id, 'url', state.popup)),

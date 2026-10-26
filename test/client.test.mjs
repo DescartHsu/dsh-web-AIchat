@@ -4,10 +4,11 @@ import { readFile } from 'node:fs/promises'
 import { JSDOM } from 'jsdom'
 import React, { act } from 'react'
 
-async function boot(desktop = true) {
+async function boot(desktop = true, fetchImplementation) {
   const dom = new JSDOM('<!doctype html><html><head></head><body><div id="root"></div></body></html>',
     { url: 'https://dsh.test/', runScripts: 'outside-only' })
   const { window } = dom
+  if (fetchImplementation) window.fetch = fetchImplementation
   const previous = new Map()
   for (const [key, value] of Object.entries({ window, document: window.document,
     ResizeObserver: class { observe() {} disconnect() {} }, IS_REACT_ACT_ENVIRONMENT: true })) {
@@ -137,5 +138,25 @@ test('built client has a usable fallback when the Desktop bridge is absent', asy
     assert.equal(fixture.window.document.querySelectorAll('webview, iframe').length, 0)
     await act(async () => fixture.window.document.getElementById('aic-tab-claude').click())
     assert.match(fixture.window.document.body.textContent, /https:\/\/claude.ai\//)
+  } finally { await fixture.finish() }
+})
+
+test('fresh desktop setup is visible in the installed UI and queues repair without claiming success', async () => {
+  const calls = []
+  const fixture = await boot(true, async (url, options) => {
+    calls.push({ url, method: options.method })
+    return { ok: true, status: 200, json: async () => ({ ok: true, supported: true, installDirectory: 'D:/Apps/Harness', onDiskEnabled: false,
+      ...(url.endsWith('/prepare') ? { job: { state: 'waiting', message: '准备就绪，请从“应用 → 退出”完整退出。' } } : {}) }) }
+  })
+  try {
+    const doc = fixture.window.document
+    const click = async text => { const button = [...doc.querySelectorAll('button')].find(item => item.textContent === text); assert.ok(button, text); await act(async () => button.click()) }
+    await click('启用登录保留')
+    assert.match(doc.body.textContent, /D:\/Apps\/Harness/)
+    await click('准备修复并在退出后自动重启')
+    assert.match(doc.body.textContent, /准备就绪/)
+    assert.equal([...doc.querySelectorAll('button')].find(item => item.textContent === '已准备，等待完整退出 DSH').disabled, true)
+    assert.ok(calls.some(call => call.url.endsWith('/prepare') && call.method === 'POST'))
+    assert.doesNotMatch(doc.body.textContent, /登录状态自动保留/)
   } finally { await fixture.finish() }
 })

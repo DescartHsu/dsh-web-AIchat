@@ -1,2 +1,3 @@
-/** Host entry: websites run inside Desktop's isolated browser guests. */
-export function apply() {}
+import { registerPersistenceRoutes } from './persistence-service.js'
+export const inject = ['webServer', 'connection']
+export function apply(ctx) { registerPersistenceRoutes(ctx) }
