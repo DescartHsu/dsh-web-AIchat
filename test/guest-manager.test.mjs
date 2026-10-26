@@ -49,6 +49,18 @@ test('tabs use separate partitions; switching and hiding preserve the same guest
   assert.equal(document.body.children.length, 0)
   assert.equal(new Set(released).size, 2)
 })
+
+test('persistent-only mode releases temporary leases before creating a login page', async () => {
+  const { document, released } = fixture()
+  const manager = createGuestManager({ document, requirePersistent: true, bridge: {
+    acquire: async () => ({ lease: 'temporary', partition: 'in-memory' }), release: async lease => { released.push(lease) },
+  } })
+  assert.equal(await manager.ensure(DEFAULT_PROVIDERS[0]), null)
+  assert.equal(manager.status('deepseek').persistent, false)
+  assert.equal(manager.status('deepseek').loading, false)
+  assert.deepEqual(released, ['temporary']); assert.equal(document.body.children.length, 0)
+  await manager.dispose()
+})
 test('rapid repeated requests share a pending acquisition and cannot steal active visibility', async () => {
   const gate = deferred()
   const { manager } = fixture({ acquire: () => gate.promise })

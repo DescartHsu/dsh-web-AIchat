@@ -1,5 +1,5 @@
 /** Detached, single-use worker: patch only after Desktop has fully exited. */
-import { readFile, writeFile, rename } from 'node:fs/promises'
+import { readFile, writeFile, rename, access } from 'node:fs/promises'
 import { execFileSync, spawn } from 'node:child_process'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -33,13 +33,24 @@ export async function runRepairJob(job, dependencies = {}) {
   const reopen = dependencies.reopen || reopenDesktop
   const sleep = dependencies.sleep || (ms => new Promise(resolve => setTimeout(resolve, ms)))
   const now = dependencies.now || Date.now
-  const save = value => writeState(job.statusFile, { jobId: job.id, updatedAt: now(), ...value })
-  await save({ state: 'waiting', message: '准备就绪，请从 DSH 的“应用 → 退出”完整退出。退出后将自动修复并重新打开。' })
-  while (now() < job.expiresAt) {
+  const ownerAlive = dependencies.ownerAlive || (pid => { try { process.kill(pid, 0); return true } catch { return false } })
+  const save = value => writeState(job.statusFile, { jobId: job.id, automatic: !!job.automatic, updatedAt: now(), ...value })
+  const cancelled = async () => {
+    if (!job.cancelFile) return false
+    try { await access(job.cancelFile); return true } catch { return false }
+  }
+  await save({ state: 'waiting', message: job.automatic
+    ? '首次登录存储已自动准备，无需点击修复。下次完整退出 DSH 时将完成设置并自动重开一次，请重开后再登录。'
+    : '准备就绪，请从 DSH 的“应用 → 退出”完整退出。退出后将自动修复并重新打开。' })
+  while (job.automatic || now() < job.expiresAt) {
+    if (await cancelled()) { await save({ state: 'cancelled', message: '插件已停用或重新加载，本次自动设置已取消。' }); return }
+    // The Host stays alive while Desktop is in use. Avoid launching PowerShell
+    // every second during long sessions; inspect all Desktop processes on exit.
+    if (job.automatic && job.ownerPid && ownerAlive(job.ownerPid)) { await sleep(1000); continue }
     if (!running(job.installDirectory)) {
       // Avoid replacing a file while child processes are still shutting down.
       await sleep(1000)
-      if (!running(job.installDirectory)) {
+      if (!running(job.installDirectory) && !await cancelled()) {
         await save({ state: 'applying', message: '正在备份并启用登录保留…' })
         try {
           const result = await apply(job.installDirectory)
@@ -48,7 +59,7 @@ export async function runRepairJob(job, dependencies = {}) {
           return
         } catch (error) {
           await save({ state: 'failed', message: `修复未完成：${error.message}` })
-          reopen(job.installDirectory)
+          if (!job.automatic) reopen(job.installDirectory)
           return
         }
       }

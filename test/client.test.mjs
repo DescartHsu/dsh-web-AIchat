@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises'
 import { JSDOM } from 'jsdom'
 import React, { act } from 'react'
 
-async function boot(desktop = true, fetchImplementation) {
+async function boot(desktop = true, fetchImplementation, persistent = true) {
   const dom = new JSDOM('<!doctype html><html><head></head><body><div id="root"></div></body></html>',
     { url: 'https://dsh.test/', runScripts: 'outside-only' })
   const { window } = dom
@@ -19,7 +19,7 @@ async function boot(desktop = true, fetchImplementation) {
   let acquired = 0
   const released = []
   if (desktop) window.dshDesktop = { protocolVersion: 1, browser: {
-    async acquire(workspace) { return { lease: `lease-${++acquired}`, partition: workspace } },
+    async acquire(workspace) { return { lease: `lease-${++acquired}`, partition: persistent ? `persist:${workspace}` : workspace } },
     async release(lease) { released.push(lease) }, onOpenRequested() { return () => {} },
   } }
   const create = window.document.createElement.bind(window.document)
@@ -141,22 +141,23 @@ test('built client has a usable fallback when the Desktop bridge is absent', asy
   } finally { await fixture.finish() }
 })
 
-test('fresh desktop setup is visible in the installed UI and queues repair without claiming success', async () => {
+test('fresh desktop setup needs no repair click and does not open a temporary login page', async () => {
   const calls = []
   const fixture = await boot(true, async (url, options) => {
     calls.push({ url, method: options.method })
     return { ok: true, status: 200, json: async () => ({ ok: true, supported: true, installDirectory: 'D:/Apps/Harness', onDiskEnabled: false,
-      ...(url.endsWith('/prepare') ? { job: { state: 'waiting', message: '准备就绪，请从“应用 → 退出”完整退出。' } } : {}) }) }
-  })
+      job: { state: 'waiting', automatic: true, message: '登录存储已自动准备，无需点击修复，完整退出后将自动重开一次。' } }) }
+  }, false)
   try {
     const doc = fixture.window.document
     const click = async text => { const button = [...doc.querySelectorAll('button')].find(item => item.textContent === text); assert.ok(button, text); await act(async () => button.click()) }
-    await click('启用登录保留')
+    assert.match(doc.body.textContent, /已自动准备/)
+    assert.equal(doc.querySelectorAll('webview').length, 0)
+    assert.equal(calls.filter(call => call.url.endsWith('/prepare')).length, 0)
+    await click('登录存储状态')
     assert.match(doc.body.textContent, /D:\/Apps\/Harness/)
-    await click('准备修复并在退出后自动重启')
-    assert.match(doc.body.textContent, /准备就绪/)
-    assert.equal([...doc.querySelectorAll('button')].find(item => item.textContent === '已准备，等待完整退出 DSH').disabled, true)
-    assert.ok(calls.some(call => call.url.endsWith('/prepare') && call.method === 'POST'))
+    assert.equal([...doc.querySelectorAll('button')].some(item => /启用登录保留|准备修复|重试自动设置/.test(item.textContent)), false)
+    assert.equal(calls.filter(call => call.url.endsWith('/prepare')).length, 0)
     assert.doesNotMatch(doc.body.textContent, /登录状态自动保留/)
   } finally { await fixture.finish() }
 })

@@ -3,7 +3,8 @@ import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, writeFile, readFile, readdir, rm } from 'node:fs/promises'
 import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createPersistenceService, findDesktopInstall, registerPersistenceRoutes } from '../src/persistence-service.js'
+import { EventEmitter } from 'node:events'
+import { createPersistenceService, findDesktopInstall, registerPersistenceRoutes, registerAutomaticPersistence } from '../src/persistence-service.js'
 import { runRepairJob } from '../lib/persistence-worker.mjs'
 
 async function temporary(run) {
@@ -44,6 +45,63 @@ test('unsupported hosts do not launch repair jobs', () => temporary(async root =
   assert.equal((await service.status()).supported, false)
   await assert.rejects(service.start(), /Windows/)
 }))
+
+test('automatic activation prepares once without a 15-minute limit and leaves failures visible', () => temporary(async root => {
+  let launched = 0, job
+  const service = createPersistenceService({ platform: 'win32', root, assetRoot: fileURLToPath(new URL('../lib/', import.meta.url)),
+    detect: async () => 'D:/Harness', prepare: async () => ({ alreadyPatched: false }),
+    launch: async (_directory, _worker, file) => { launched++; job = JSON.parse(await readFile(file, 'utf8')) },
+  })
+  const prepared = await service.ensureAutomatic()
+  assert.equal(prepared.job.automatic, true); assert.equal(job.expiresAt, null)
+  assert.equal((await service.ensureAutomatic()).job.jobId, job.id)
+  assert.equal(launched, 1)
+  await writeFile(job.statusFile, JSON.stringify({ jobId: job.id, state: 'failed', message: 'Access denied' }))
+  assert.equal((await service.ensureAutomatic()).job.state, 'failed'); assert.equal(launched, 1)
+  await service.cancel(job.id)
+  assert.equal(await readFile(job.cancelFile, 'utf8'), '')
+}))
+
+test('already persistent and unsupported hosts do not schedule automatic repair', () => temporary(async root => {
+  for (const platform of ['win32', 'darwin']) {
+    const service = createPersistenceService({ platform, root, detect: async () => 'D:/Harness',
+      prepare: async () => ({ alreadyPatched: true }), launch: async () => { throw Error('must not launch') } })
+    const info = await service.ensureAutomatic()
+    assert.equal(info.job, null)
+  }
+}))
+
+test('different Desktop installations do not reuse each other jobs or block cancellation', () => temporary(async root => {
+  const make = directory => createPersistenceService({ platform: 'win32', root,
+    assetRoot: fileURLToPath(new URL('../lib/', import.meta.url)), detect: async () => directory,
+    prepare: async () => ({ alreadyPatched: false }), launch: async () => {},
+  })
+  const first = make('D:/Harness'), second = make('E:/Harness')
+  const one = await first.ensureAutomatic()
+  assert.equal((await second.status()).job, null)
+  const two = await second.ensureAutomatic()
+  assert.notEqual(one.job.jobId, two.job.jobId)
+  await first.cancel(one.job.jobId)
+  assert.equal(await readFile(join(root, one.job.jobId, 'cancel'), 'utf8'), '')
+  await assert.rejects(readFile(join(root, two.job.jobId, 'cancel')), { code: 'ENOENT' })
+}))
+
+test('automatic lifecycle starts without UI, cancels on disable even during preparation, and survives normal Desktop shutdown', async () => {
+  for (const shutdown of [false, true]) {
+    const carrier = new EventEmitter(), cancelled = []; let cleanup, calls = 0, complete
+    const prepared = new Promise(resolve => { complete = resolve })
+    registerAutomaticPersistence({ effect: fn => { cleanup = fn() } }, {
+      ensureAutomatic: async () => { calls++; await prepared; return { job: { jobId: 'auto-job' } } },
+      cancel: async id => { cancelled.push(id) },
+    }, { process: carrier, setInterval: () => ({ unref() {} }), clearInterval() {} })
+    assert.equal(calls, 1)
+    if (shutdown) carrier.emit('message', { type: 'shutdown' })
+    const disposing = cleanup()
+    complete(); await disposing
+    assert.deepEqual(cancelled, shutdown ? [] : ['auto-job'])
+    assert.equal(carrier.listenerCount('message'), 0)
+  }
+})
 test('repair worker waits for full exit, applies once, records backup and reopens Desktop', () => temporary(async root => {
   let checks = 0, applied = 0, reopened = 0, clock = 0
   const job = { id: 'fixture', installDirectory: 'D:/Harness', statusFile: join(root, 'status.json'), expiresAt: 10000 }
@@ -68,6 +126,22 @@ test('waiting expiry and repair failures remain visible instead of reporting log
   })
   const state = JSON.parse(await readFile(job.statusFile, 'utf8'))
   assert.equal(state.state, 'failed'); assert.match(state.message, /Access denied/); assert.equal(reopened, 1)
+}))
+
+test('automatic worker completes after long sessions, honours cancellation and does not reopen on failure', () => temporary(async root => {
+  const job = { id: 'auto', automatic: true, expiresAt: null, installDirectory: 'D:/Harness',
+    statusFile: join(root, 'status.json'), cancelFile: join(root, 'cancel') }
+  let applied = 0, reopened = 0
+  const dependencies = { running: () => false, sleep: async () => {}, now: () => 7 * 86400000,
+    apply: async () => { applied++; return { backup: 'backup' } }, reopen: () => { reopened++ } }
+  await runRepairJob(job, dependencies)
+  assert.equal(applied, 1); assert.equal(reopened, 1)
+  await runRepairJob(job, { ...dependencies, apply: async () => { throw Error('Access denied') } })
+  assert.equal(JSON.parse(await readFile(job.statusFile, 'utf8')).state, 'failed'); assert.equal(reopened, 1)
+  await writeFile(job.cancelFile, '')
+  await runRepairJob(job, dependencies)
+  assert.equal(JSON.parse(await readFile(job.statusFile, 'utf8')).state, 'cancelled')
+  assert.equal(applied, 1); assert.equal(reopened, 1)
 }))
 test('setup routes require host authentication, loopback and explicit POST requests', async () => {
   const routes = [], callbacks = []; let calls = 0

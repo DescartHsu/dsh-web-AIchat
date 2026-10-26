@@ -45,6 +45,7 @@ export function createPersistenceService(options = {}) {
   const latest = join(root, 'latest.json')
   let pending
   let capability
+  let setupError = ''
   const readLatest = async () => {
     try { return JSON.parse(await readFile(latest, 'utf8')) } catch { return null }
   }
@@ -59,31 +60,80 @@ export function createPersistenceService(options = {}) {
         const plan = await prepare(installDirectory)
         return { supported: true, installDirectory, onDiskEnabled: plan.alreadyPatched }
       })()
-      return { ...await capability, job }
+      const info = await capability
+      if (previous?.installDirectory && resolve(previous.installDirectory).toLowerCase() !== resolve(info.installDirectory).toLowerCase()) job = null
+      return { ...info, job, setupError }
     } catch (error) { return { supported: false, message: error.message, job } }
   }
-  async function startOnce() {
+  async function startOnce({ automatic = false } = {}) {
     const current = await status()
     if (!current.supported) throw Error(current.message)
+    if (current.onDiskEnabled) return current
     const previous = await readLatest()
-    if (previous?.expiresAt > Date.now() && ['waiting', 'applying', 'queued'].includes(current.job?.state)) return current
+    if ((previous?.automatic || previous?.expiresAt > Date.now()) && ['waiting', 'applying', 'queued'].includes(current.job?.state)
+      && !(previous.cancelFile && await exists(previous.cancelFile))) return current
     const id = randomUUID(), directory = join(root, id)
     await mkdir(directory, { recursive: true })
     const worker = join(directory, 'persistence-worker.mjs')
     // Copy both modules out of node_modules so uninstall/reload cannot interrupt the prepared job.
     await copyFile(join(assetRoot, 'persistence-worker.mjs'), worker)
     await copyFile(join(assetRoot, 'desktop-persistence.mjs'), join(directory, 'desktop-persistence.mjs'))
-    const job = { id, installDirectory: current.installDirectory, statusFile: join(directory, 'status.json'), expiresAt: Date.now() + 15 * 60 * 1000 }
+    const job = { id, installDirectory: current.installDirectory, statusFile: join(directory, 'status.json'),
+      cancelFile: join(directory, 'cancel'), ownerPid: process.pid, automatic, expiresAt: automatic ? null : Date.now() + 15 * 60 * 1000 }
     const jobFile = join(directory, 'job.json')
     await writeFile(jobFile, JSON.stringify(job), { mode: 0o600 })
-    await writeFile(job.statusFile, JSON.stringify({ jobId: id, state: 'queued', message: '修复工具已准备，请从“应用 → 退出”完整退出 DSH。' }), { mode: 0o600 })
+    await writeFile(job.statusFile, JSON.stringify({ jobId: id, state: 'queued', automatic,
+      message: automatic ? '首次登录存储已自动准备，无需点击修复。下次完整退出 DSH 时将完成设置并自动重开一次，请重开后再登录。' : '修复工具已准备，请从“应用 → 退出”完整退出 DSH。' }), { mode: 0o600 })
     await writeFile(latest, JSON.stringify(job), { mode: 0o600 })
     try { await launch(current.installDirectory, worker, jobFile) }
     catch (error) { await writeFile(job.statusFile, JSON.stringify({ jobId: id, state: 'failed', message: '无法启动修复工具：' + error.message })); throw error }
     return { ...current, job: JSON.parse(await readFile(job.statusFile, 'utf8')) }
   }
-  function start() { return pending ||= startOnce().finally(() => { pending = null }) }
-  return { status, start }
+  function start(options) {
+    if (!pending) setupError = ''
+    return pending ||= startOnce(options).catch(error => { setupError = error.message; throw error }).finally(() => { pending = null })
+  }
+  async function ensureAutomatic() {
+    const current = await status()
+    if (!current.supported || current.onDiskEnabled || current.job?.state === 'failed') return current
+    setupError = ''
+    return start({ automatic: true })
+  }
+  async function cancel(id) {
+    if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id || '')) return
+    try { await writeFile(join(root, id, 'cancel'), '', { mode: 0o600 }) }
+    catch (error) { if (error.code !== 'ENOENT') throw error }
+  }
+  return { status, start, ensureAutomatic, cancel }
+}
+
+/** Prepare on plugin activation; do not interrupt work or require a UI action. */
+export function registerAutomaticPersistence(ctx, service, runtime = {}) {
+  const carrier = runtime.process || process
+  const repeat = runtime.setInterval || setInterval
+  const stop = runtime.clearInterval || clearInterval
+  ctx.effect(() => {
+    let disposed = false, shuttingDown = false, ownedJob, task
+    // Desktop 0.2.1-rc.3 sends this IPC message before disposing its Host.
+    const onMessage = message => { if (message?.type === 'shutdown') shuttingDown = true }
+    carrier.on('message', onMessage)
+    const run = () => {
+      if (disposed) return
+      return task ||= service.ensureAutomatic().then(info => { ownedJob = info.job?.jobId }).catch(() => {
+        // status() exposes failures to the panel; activation must remain usable.
+      }).finally(() => { task = null })
+    }
+    void run()
+    const timer = repeat(run, 5 * 60 * 1000)
+    timer.unref?.()
+    return async () => {
+      disposed = true; stop(timer); carrier.off('message', onMessage)
+      await task
+      // Disabling/reloading the plugin cancels its job. A normal Desktop quit
+      // leaves the worker alive to finish after the executable has stopped.
+      if (!shuttingDown) await service.cancel(ownedJob)
+    }
+  }, 'web-aichat: automatic login storage')
 }
 
 export function registerPersistenceRoutes(ctx, service = createPersistenceService()) {
@@ -97,7 +147,7 @@ export function registerPersistenceRoutes(ctx, service = createPersistenceServic
         if (req.method !== 'POST') { reply(405, { ok: false }); return }
         if (!/^application\/json(?:;|$)/i.test(req.headers['content-type'] || '')) { reply(415, { ok: false }); return }
         try {
-          const result = action === 'status' ? await service.status() : await service.start()
+          const result = action === 'status' ? await service.status() : await service.start({ automatic: true })
           reply(200, { ok: true, ...result })
         } catch (error) { reply(400, { ok: false, error: error.message }) }
       },

@@ -3,7 +3,7 @@ import { guestThemeCSS, installGuestTheme } from './theme.js'
 import { installDeepseekNoticeDismissal } from './deepseek-notice.js'
 
 /** Owns leases independently of React mounts, so switching panels preserves pages. */
-export function createGuestManager({ bridge, document, onChange = () => {} }) {
+export function createGuestManager({ bridge, document, onChange = () => {}, requirePersistent = false }) {
   const entries = new Map()
   const pending = new Map()
   const cancelled = new Set()
@@ -108,6 +108,11 @@ export function createGuestManager({ bridge, document, onChange = () => {} }) {
         lease = reservation.lease
         if (disposed || cancelled.has(token)) { await release(lease); return null }
         notify(provider.id, { persistent: reservation.partition.startsWith('persist:') })
+        if (requirePersistent && !reservation.partition.startsWith('persist:')) {
+          await release(lease)
+          notify(provider.id, { loading: false, ready: false })
+          return null
+        }
         const element = document.createElement('webview')
         const container = document.createElement('div')
         entry = { element, container, lease, listeners: [], ready: false, origin: new URL(url).origin }
