@@ -125,10 +125,10 @@ test('custom website form adds an entry, opens it, and can remove it', async () 
     assert.equal(saved.selected, saved.custom[0].id)
     assert.ok(doc.querySelector(`[data-dsh-web-aichat="${saved.selected}"]`))
     await clickText('管理网站')
-    await clickText('移除入口')
+    await act(async () => doc.querySelector('button[aria-label="删除 Example AI"]').click())
     assert.equal(doc.querySelectorAll('[role=tab]').length, 8)
     assert.equal(doc.querySelector(`[data-dsh-web-aichat="${saved.selected}"]`), null)
-    assert.equal(JSON.parse(window.localStorage.getItem('dsh-web-aichat:config:v1')).selected, 'deepseek')
+    assert.equal(JSON.parse(window.localStorage.getItem('dsh-web-aichat:config:v1')).selected, 'qwen')
   } finally { await fixture.finish() }
 })
 
@@ -238,5 +238,54 @@ test('Alt+arrow moves a focused tab without switching chats and plain arrows fol
     assert.equal(tab.getAttribute('aria-selected'), 'true'); assert.equal(doc.activeElement, tab)
     await key('ArrowLeft')
     assert.equal(doc.getElementById('aic-tab-claude').getAttribute('aria-selected'), 'true')
+  } finally { await fixture.finish() }
+})
+
+test('deleting the active built-in closes only its guest, persists across reload, and can restore its entry', async () => {
+  const fixture = await boot()
+  let saved
+  try {
+    const { window } = fixture, doc = window.document
+    await act(async () => doc.getElementById('aic-tab-chatgpt').click())
+    await act(async () => doc.getElementById('aic-tab-deepseek').click())
+    const other = doc.querySelector('[data-dsh-web-aichat=chatgpt]')
+    await act(async () => [...doc.querySelectorAll('button')].find(button => button.textContent === '管理网站').click())
+    await act(async () => doc.querySelector('button[aria-label="删除 DeepSeek"]').click())
+    assert.equal(doc.getElementById('aic-tab-deepseek'), null)
+    assert.equal(doc.querySelector('[data-dsh-web-aichat=deepseek]'), null)
+    assert.equal(doc.querySelector('[data-dsh-web-aichat=chatgpt]'), other)
+    assert.equal(fixture.released.length, 1)
+    saved = JSON.parse(window.localStorage.getItem('dsh-web-aichat:config:v1'))
+    assert.equal(saved.selected, 'chatgpt'); assert.deepEqual(saved.hidden, ['deepseek'])
+  } finally { await fixture.finish() }
+  const restored = await boot(true, undefined, true, saved)
+  try {
+    const doc = restored.window.document
+    assert.equal(doc.getElementById('aic-tab-deepseek'), null)
+    await act(async () => [...doc.querySelectorAll('button')].find(button => button.textContent === '管理网站').click())
+    await act(async () => doc.querySelector('button[aria-label="恢复 DeepSeek"]').click())
+    assert.ok(doc.getElementById('aic-tab-deepseek'))
+    assert.equal(doc.getElementById('aic-tab-chatgpt').getAttribute('aria-selected'), 'true')
+    assert.deepEqual(JSON.parse(restored.window.localStorage.getItem('dsh-web-aichat:config:v1')).hidden, [])
+  } finally { await restored.finish() }
+})
+
+test('all sites can be deleted without reopening a hidden site, and the empty state can restore one', async () => {
+  const fixture = await boot()
+  try {
+    const doc = fixture.window.document
+    const clickText = async text => { await act(async () => [...doc.querySelectorAll('button')].find(button => button.textContent === text).click()) }
+    await clickText('管理网站')
+    for (const button of [...doc.querySelectorAll('button[aria-label^="删除 "]')]) await act(async () => button.click())
+    assert.equal(doc.querySelectorAll('[role=tab]').length, 0)
+    assert.equal(doc.querySelectorAll('webview').length, 0)
+    await clickText('返回聊天')
+    assert.match(doc.body.textContent, /还没有网站/)
+    assert.equal(doc.querySelectorAll('webview').length, 0)
+    await clickText('添加或恢复网站')
+    await act(async () => doc.querySelector('button[aria-label="恢复 Claude"]').click())
+    await clickText('返回聊天')
+    assert.equal(doc.querySelectorAll('[role=tab]').length, 1)
+    assert.ok(doc.querySelector('[data-dsh-web-aichat=claude]'))
   } finally { await fixture.finish() }
 })

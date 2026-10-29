@@ -1,4 +1,4 @@
-import { DEFAULT_PROVIDERS, readConfig, writeConfig, validateCustomProvider, normalizeConfig, orderedProviders, moveProvider } from './providers.js'
+import { DEFAULT_PROVIDERS, readConfig, writeConfig, validateCustomProvider, normalizeConfig, orderedProviders, moveProvider, deleteProvider } from './providers.js'
 import { createGuestManager } from './guest-manager.js'
 import css from './styles.css'
 import { watchHostTheme } from './theme.js'
@@ -99,8 +99,7 @@ window.__ModuleLoader__.load({
       const remove = async id => {
         setRemoving(true)
         await manager.close(id)
-        save({ ...config, custom: config.custom.filter(item => item.id !== id),
-          selected: config.selected === id ? 'deepseek' : config.selected })
+        save(deleteProvider(config, id))
         setRemoving(false)
       }
       return h('div', { className: 'aic-settings' },
@@ -112,12 +111,17 @@ window.__ModuleLoader__.load({
           h('label', null, '官网地址', h('input', { type: 'url', value: url, required: true, placeholder: 'https://www.perplexity.ai/', onChange: e => setUrl(e.target.value) })),
           h('button', { className: 'aic-button aic-primary', type: 'submit', disabled: removing }, '添加并打开')),
         error ? h('p', { role: 'alert', className: 'aic-error' }, error) : null,
-        h('h3', null, '已添加的网站'),
-        config.custom.length ? config.custom.map(item => h('div', { className: 'aic-site-row', key: item.id },
+        storageNotice ? h('p', { role: 'alert', className: 'aic-error' }, storageNotice) : null,
+        h('h3', null, '当前网站'),
+        providers().length ? providers().map(item => h('div', { className: 'aic-site-row', key: item.id },
           h('div', null, h('strong', null, item.name), h('small', null, item.url)),
-          h('button', { className: 'aic-button', disabled: removing, onClick: () => void remove(item.id) }, '移除入口'))) :
-          h('p', { className: 'aic-muted' }, '还没有自定义网站。内置的 8 个入口随时可用。'),
-        h('p', { className: 'aic-footnote' }, '移除入口会关闭该页面，不会注销官网账号。网站登录与使用规则由各官网决定。'))
+          h('button', { className: 'aic-button', disabled: removing, 'aria-label': `删除 ${item.name}`, onClick: () => void remove(item.id) }, '删除网站'))) :
+          h('p', { className: 'aic-muted' }, '还没有网站，可在上方添加，或恢复下方的内置网站。'),
+        config.hidden.length ? h(React.Fragment, null, h('h3', null, '已删除的内置网站'),
+          DEFAULT_PROVIDERS.filter(item => config.hidden.includes(item.id)).map(item => h('div', { className: 'aic-site-row', key: item.id },
+            h('strong', null, item.name), h('button', { className: 'aic-button', disabled: removing, 'aria-label': `恢复 ${item.name}`,
+              onClick: () => save({ ...config, hidden: config.hidden.filter(id => id !== item.id) }) }, '恢复网站')))) : null,
+        h('p', { className: 'aic-footnote' }, '删除网站会关闭对应页面并移除入口，不清除官网登录数据。内置网站可在此恢复；自定义网站可重新添加。'))
     }
     function Panel() {
       const [, rerender] = React.useReducer(value => value + 1, 0)
@@ -137,7 +141,7 @@ window.__ModuleLoader__.load({
         keyboardFocus.current = null
       })
       const hostRef = React.useRef(null)
-      const current = providers().find(item => item.id === config.selected) || DEFAULT_PROVIDERS[0]
+      const current = providers().find(item => item.id === config.selected) || providers()[0] || { id: '', name: '网站', url: '' }
       const state = manager.status(current.id)
       const needsSetup = manager.available && state.persistent === false
       const setupMessage = setupInfo?.setupError || (!setupInfo?.supported && setupInfo?.message)
@@ -154,7 +158,7 @@ window.__ModuleLoader__.load({
       React.useEffect(() => { listeners.add(rerender); rerender(); return () => listeners.delete(rerender) }, [])
       React.useEffect(() => {
         const host = hostRef.current
-        if (settings || loginSetup || reopening || !host) return
+        if (settings || loginSetup || reopening || !host || !current.id) return
         let alive = true
         manager.show(current.id, host)
         void manager.ensure(current).then(() => { if (alive) manager.show(current.id, host) })
@@ -265,22 +269,23 @@ window.__ModuleLoader__.load({
             button('首页', '返回官网首页', () => void manager.navigate(current.id, 'url', current.url)),
             button('刷新', '刷新当前网页', () => void manager.navigate(current.id, 'reload')),
             h('span', { className: 'aic-address', title: state.url || current.url }, state.url || current.url),
-            button('复制地址', '复制当前网址', () => void copyUrl(), false),
+            button('复制地址', '复制当前网址', () => void copyUrl(), !current.url),
             needsSetup ? button('登录存储状态', '查看自动配置登录保留的进度', () => setLoginSetup(true), false) : null,
             h('button', { type: 'button', className: 'aic-button', 'aria-pressed': config.followTheme,
               title: '同步官网内部配色；关闭可恢复官网原色',
               onClick: () => save({ ...config, followTheme: !config.followTheme }) }, config.followTheme ? '跟随皮肤' : '官网原色'),
             button('重新打开', '关闭并重新创建当前网页', () => void reopen(), !manager.available || reopening)),
           h('div', { className: `aic-status${state.error ? ' aic-error' : ''}`, role: state.error ? 'alert' : 'status', 'aria-live': 'polite' },
-            state.error || state.themeError || (reopening ? '正在重新打开…' : state.loading ? `正在加载 ${current.name}…` : notice || storageNotice ||
-              (state.persistent ? '登录状态自动保留 · 官网过期或要求验证时需重新登录' : setupMessage))),
+            (!current.id ? '还没有网站，请点击“管理网站”添加或恢复。' : state.error || state.themeError || (reopening ? '正在重新打开…' : state.loading ? `正在加载 ${current.name}…` : notice || storageNotice ||
+              (state.persistent ? '登录状态自动保留 · 官网过期或要求验证时需重新登录' : setupMessage)))),
           state.popup ? h('div', { className: 'aic-popup' },
             h('span', null, '官网请求打开：', h('code', null, state.popup)),
             button('在当前页打开', '在当前页打开该链接', () => void manager.navigate(current.id, 'url', state.popup)),
             button('忽略', '忽略该链接', () => manager.dismissPopup(current.id), false)) : null,
           h('div', { id: 'aic-content', role: 'tabpanel', 'aria-labelledby': `aic-tab-${current.id}`,
             className: 'aic-viewport', ref: hostRef },
-            !manager.available ? h('div', { className: 'aic-empty' }, h(Icon, { size: 38 }),
+            !current.id ? h('div', { className: 'aic-empty' }, h('h2', null, '还没有网站'),
+              h('button', { className: 'aic-button', onClick: () => setSettings(true) }, '添加或恢复网站')) : !manager.available ? h('div', { className: 'aic-empty' }, h(Icon, { size: 38 }),
               h('h2', null, '在 DSH Desktop 中打开 AI Chat'),
               h('p', null, '内嵌聊天需要桌面客户端的 Browser guest bridge。当前环境可使用顶部标签选择网站并复制地址。'),
               h('code', null, current.url)) : needsSetup ? h('div', { className: 'aic-empty' }, h(Icon, { size: 38 }),

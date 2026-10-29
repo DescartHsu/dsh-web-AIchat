@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { DEFAULT_PROVIDERS, normalizeConfig, validateCustomProvider, safeWebUrl, readConfig, writeConfig, orderedProviders, moveProvider } from '../src/providers.js'
+import { DEFAULT_PROVIDERS, normalizeConfig, validateCustomProvider, safeWebUrl, readConfig, writeConfig, orderedProviders, moveProvider, deleteProvider } from '../src/providers.js'
 
 test('rejects executable URLs, credentials, and insecure custom sites', () => {
   for (const url of ['javascript:alert(1)', 'file:///C:/secret', 'data:text/html,a', 'https://user:pass@example.com']) {
@@ -58,4 +58,21 @@ test('moves sites in both directions and across built-ins, saves order, and keep
   const storage = { getItem: () => stored, setItem: (_key, value) => { stored = value } }
   assert.equal(writeConfig(storage, last), true)
   assert.deepEqual(readConfig(storage).order, last.order)
+})
+
+test('deletion persists built-in exclusions, cleans custom sites and order, and handles an empty list and restoration', () => {
+  let config = normalizeConfig({ version: 1, selected: 'chatgpt', order: ['chatgpt', 'claude', 'deepseek'],
+    hidden: ['unknown', 'custom-example'], custom: [{ id: 'custom-example', name: 'Example', url: 'https://example.com/' }] })
+  config = deleteProvider(config, 'chatgpt')
+  assert.equal(config.selected, 'claude'); assert.deepEqual(config.hidden, ['chatgpt'])
+  assert.equal(config.order.includes('chatgpt'), false)
+  config = deleteProvider(config, 'custom-example')
+  assert.equal(config.custom.length, 0)
+  const stored = normalizeConfig(JSON.parse(JSON.stringify(config)))
+  assert.equal(orderedProviders(stored).some(item => item.id === 'chatgpt'), false)
+  for (const id of [...config.order]) config = deleteProvider(config, id)
+  assert.equal(config.selected, ''); assert.deepEqual(config.order, []); assert.deepEqual(orderedProviders(config), [])
+  assert.deepEqual(deleteProvider(config, 'unknown'), config)
+  config = normalizeConfig({ ...config, hidden: config.hidden.filter(id => id !== 'chatgpt') })
+  assert.equal(config.selected, 'chatgpt'); assert.deepEqual(config.order, ['chatgpt'])
 })

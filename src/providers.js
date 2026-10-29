@@ -40,16 +40,19 @@ export function normalizeConfig(value) {
       } catch { /* Ignore malformed stored entries, keeping the usable ones. */ }
     }
   }
+  const hidden = value?.version === 1 && Array.isArray(value.hidden)
+    ? DEFAULT_PROVIDERS.filter(provider => value.hidden.includes(provider.id)).map(provider => provider.id) : []
+  for (const id of hidden) ids.delete(id)
   const order = []
   if (value?.version === 1 && Array.isArray(value.order)) {
     for (const id of value.order.slice(0, 256)) if (ids.has(id) && !order.includes(id)) order.push(id)
   }
   for (const id of ids) if (!order.includes(id)) order.push(id)
-  return { version: 1, custom, order, selected: ids.has(value?.selected) ? value.selected : 'deepseek', followTheme: value?.followTheme !== false }
+  return { version: 1, custom, hidden, order, selected: ids.has(value?.selected) ? value.selected : order[0] || '', followTheme: value?.followTheme !== false }
 }
 
 export function orderedProviders(config) {
-  const remaining = new Map([...DEFAULT_PROVIDERS, ...config.custom].map(provider => [provider.id, provider]))
+  const remaining = new Map([...DEFAULT_PROVIDERS, ...config.custom].filter(provider => !config.hidden.includes(provider.id)).map(provider => [provider.id, provider]))
   const providers = []
   for (const id of config.order) {
     if (remaining.has(id)) { providers.push(remaining.get(id)); remaining.delete(id) }
@@ -64,6 +67,18 @@ export function moveProvider(config, sourceId, targetId, position = 'before') {
   next.order = next.order.filter(id => id !== sourceId)
   next.order.splice(next.order.indexOf(targetId) + (position === 'after' ? 1 : 0), 0, sourceId)
   return next
+}
+
+export function deleteProvider(config, id) {
+  const current = normalizeConfig(config)
+  const index = current.order.indexOf(id)
+  if (index < 0) return current
+  const remaining = current.order.filter(value => value !== id)
+  return normalizeConfig({ ...current,
+    hidden: DEFAULT_PROVIDERS.some(provider => provider.id === id) ? [...current.hidden, id] : current.hidden,
+    custom: current.custom.filter(provider => provider.id !== id),
+    selected: current.selected === id ? remaining[index] || remaining[index - 1] || '' : current.selected,
+  })
 }
 
 export function readConfig(storage) {
