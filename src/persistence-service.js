@@ -5,6 +5,7 @@ import { homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { prepareDesktopPatch, nativeFileSystem } from '../scripts/desktop-persistence.mjs'
+import manifest from '../package.json' with { type: 'json' }
 
 async function exists(file) { try { await nativeFileSystem.access(file); return true } catch { return false } }
 export async function findDesktopInstall(executable = process.execPath) {
@@ -53,12 +54,12 @@ export function createPersistenceService(options = {}) {
     const previous = await readLatest()
     let job = null
     if (previous) { try { job = JSON.parse(await readFile(previous.statusFile, 'utf8')) } catch { /* Not started yet. */ } }
-    if (platform !== 'win32') return { supported: false, message: '当前一键修复支持 Windows DSH Desktop 0.2.1-rc.3。', job }
+    if (platform !== 'win32') return { supported: false, message: '自动登录存储配置目前支持已验证版本的 Windows DSH Desktop。', job }
     try {
       capability ||= (async () => {
         const installDirectory = await detect()
         const plan = await prepare(installDirectory)
-        return { supported: true, installDirectory, onDiskEnabled: plan.alreadyPatched }
+        return { supported: true, installDirectory, desktopVersion: plan.desktopVersion, onDiskEnabled: plan.alreadyPatched }
       })()
       const info = await capability
       if (previous?.installDirectory && resolve(previous.installDirectory).toLowerCase() !== resolve(info.installDirectory).toLowerCase()) job = null
@@ -71,7 +72,10 @@ export function createPersistenceService(options = {}) {
     if (current.onDiskEnabled) return current
     const previous = await readLatest()
     if ((previous?.automatic || previous?.expiresAt > Date.now()) && ['waiting', 'applying', 'queued'].includes(current.job?.state)
-      && !(previous.cancelFile && await exists(previous.cancelFile))) return current
+      && !(previous.cancelFile && await exists(previous.cancelFile))) {
+      if (previous.pluginVersion === manifest.version && previous.desktopVersion === current.desktopVersion) return current
+      await cancel(previous.id)
+    }
     const id = randomUUID(), directory = join(root, id)
     await mkdir(directory, { recursive: true })
     const worker = join(directory, 'persistence-worker.mjs')
@@ -79,7 +83,8 @@ export function createPersistenceService(options = {}) {
     await copyFile(join(assetRoot, 'persistence-worker.mjs'), worker)
     await copyFile(join(assetRoot, 'desktop-persistence.mjs'), join(directory, 'desktop-persistence.mjs'))
     const job = { id, installDirectory: current.installDirectory, statusFile: join(directory, 'status.json'),
-      cancelFile: join(directory, 'cancel'), ownerPid: process.pid, automatic, expiresAt: automatic ? null : Date.now() + 15 * 60 * 1000 }
+      cancelFile: join(directory, 'cancel'), ownerPid: process.pid, pluginVersion: manifest.version, desktopVersion: current.desktopVersion,
+      automatic, expiresAt: automatic ? null : Date.now() + 15 * 60 * 1000 }
     const jobFile = join(directory, 'job.json')
     await writeFile(jobFile, JSON.stringify(job), { mode: 0o600 })
     await writeFile(job.statusFile, JSON.stringify({ jobId: id, state: 'queued', automatic,
@@ -95,7 +100,12 @@ export function createPersistenceService(options = {}) {
   }
   async function ensureAutomatic() {
     const current = await status()
-    if (!current.supported || current.onDiskEnabled || current.job?.state === 'failed') return current
+    if (!current.supported || current.onDiskEnabled) return current
+    const previous = await readLatest()
+    // An upgrade gets one fresh attempt. Keep failures for the same plugin and
+    // Desktop version visible instead of retrying on every application quit.
+    if (current.job?.state === 'failed' && previous?.pluginVersion === manifest.version
+      && previous?.desktopVersion === current.desktopVersion) return current
     setupError = ''
     return start({ automatic: true })
   }
@@ -114,7 +124,7 @@ export function registerAutomaticPersistence(ctx, service, runtime = {}) {
   const stop = runtime.clearInterval || clearInterval
   ctx.effect(() => {
     let disposed = false, shuttingDown = false, ownedJob, task
-    // Desktop 0.2.1-rc.3 sends this IPC message before disposing its Host.
+    // Verified Desktop builds send this IPC message before disposing the Host.
     const onMessage = message => { if (message?.type === 'shutdown') shuttingDown = true }
     carrier.on('message', onMessage)
     const run = () => {

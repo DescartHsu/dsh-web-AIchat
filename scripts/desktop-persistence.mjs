@@ -1,4 +1,4 @@
-/** Narrow, reversible compatibility repair for DSH Desktop 0.2.1-rc.3. */
+/** Narrow, reversible compatibility repair for verified DSH Desktop builds. */
 import * as nodeFiles from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { createHash } from 'node:crypto'
@@ -13,6 +13,7 @@ try { nativeFileSystem = createRequire(import.meta.url)('original-fs').promises 
 const { readFile, writeFile, copyFile, rename } = nativeFileSystem
 
 const MARKER = '/* dsh-web-aichat: persistent partitions v1 */'
+export const SUPPORTED_DESKTOP_VERSIONS = Object.freeze(['0.2.1-rc.3', '0.2.1-rc.4', '0.2.1-rc.5', '0.2.2-alpha.2'])
 const sha256 = value => createHash('sha256').update(value).digest('hex')
 export function parseArchive(bytes) {
   const length = bytes.readUInt32LE(12)
@@ -74,7 +75,7 @@ export async function prepareDesktopPatch(installDirectory) {
   const bytes = await readFile(file)
   const archive = parseArchive(bytes)
   const pkg = JSON.parse(readEntry(archive, 'package.json').toString('utf8'))
-  if (pkg.version !== '0.2.1-rc.3' || pkg.main !== 'lib/main.js') throw Error('This compatibility repair supports only DSH Desktop 0.2.1-rc.3')
+  if (!SUPPORTED_DESKTOP_VERSIONS.includes(pkg.version) || pkg.main !== 'lib/main.js') throw Error(`Unsupported DSH Desktop build: ${pkg.version}. Verified versions: ${SUPPORTED_DESKTOP_VERSIONS.join(', ')}`)
   const executable = await readFile(join(directory, 'DeepSeek Harness.exe'))
   const sentinel = Buffer.from('dL7pKGdnNz796PbbjQWNKmHXBZaB9tsX')
   const position = executable.indexOf(sentinel)
@@ -83,7 +84,7 @@ export async function prepareDesktopPatch(installDirectory) {
   const source = readEntry(archive, pkg.main).toString('utf8')
   const patched = patchDesktopMain(source)
   const output = patched === source ? bytes : replaceEntry(bytes, pkg.main, patched)
-  return { file, bytes, output, alreadyPatched: patched === source, before: sha256(bytes), after: sha256(output), main: pkg.main }
+  return { file, bytes, output, desktopVersion: pkg.version, alreadyPatched: patched === source, before: sha256(bytes), after: sha256(output), main: pkg.main }
 }
 
 export async function applyDesktopPatch(directory) {

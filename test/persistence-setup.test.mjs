@@ -71,6 +71,26 @@ test('already persistent and unsupported hosts do not schedule automatic repair'
   }
 }))
 
+test('upgrades retry old failures and replace old pending workers, but current-version failures remain stopped', () => temporary(async root => {
+  const options = { platform: 'win32', root, assetRoot: fileURLToPath(new URL('../lib/', import.meta.url)),
+    detect: async () => 'D:/Harness', prepare: async () => ({ alreadyPatched: false, desktopVersion: '0.2.1-rc.5' }), launch: async () => {} }
+  const service = createPersistenceService(options)
+  const initial = await service.ensureAutomatic()
+  const latestFile = join(root, 'latest.json'), previous = JSON.parse(await readFile(latestFile, 'utf8'))
+  previous.pluginVersion = '0.1.8'; previous.desktopVersion = '0.2.1-rc.3'
+  await writeFile(latestFile, JSON.stringify(previous))
+  const queued = await createPersistenceService(options).ensureAutomatic()
+  assert.notEqual(queued.job.jobId, initial.job.jobId)
+  assert.equal(await readFile(previous.cancelFile, 'utf8'), '')
+  const old = JSON.parse(await readFile(latestFile, 'utf8')); old.pluginVersion = '0.1.8'
+  await writeFile(latestFile, JSON.stringify(old)); await writeFile(old.statusFile, JSON.stringify({ jobId: old.id, state: 'failed' }))
+  const retried = await createPersistenceService(options).ensureAutomatic()
+  assert.notEqual(retried.job.jobId, old.id)
+  const current = JSON.parse(await readFile(latestFile, 'utf8'))
+  await writeFile(current.statusFile, JSON.stringify({ jobId: current.id, state: 'failed' }))
+  assert.equal((await createPersistenceService(options).ensureAutomatic()).job.jobId, current.id)
+}))
+
 test('different Desktop installations do not reuse each other jobs or block cancellation', () => temporary(async root => {
   const make = directory => createPersistenceService({ platform: 'win32', root,
     assetRoot: fileURLToPath(new URL('../lib/', import.meta.url)), detect: async () => directory,

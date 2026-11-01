@@ -1,6 +1,6 @@
 {
   "name": "dsh-web-aichat",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "DSH 左侧栏 AI 官网聊天聚合面板：顶部切换多个 AI，保留已打开页面。",
   "type": "module",
   "license": "UNLICENSED",

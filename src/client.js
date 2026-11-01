@@ -64,6 +64,7 @@ window.__ModuleLoader__.load({
         h('p', null, '插件会自动配置登录保留，无需点击修复。首次使用时，请完成运行中的任务，再从“应用 → 退出”完整退出 DSH 一次（仅关闭窗口可能仍在托盘运行）。'),
         h('p', null, '工具会自动备份、完成修复并重新打开 DSH，随后在各官网重新登录一次。登录仍受官网有效期和验证要求限制。'),
         info?.installDirectory ? h('p', { className: 'aic-muted' }, '检测到安装位置：', h('code', null, info.installDirectory)) : null,
+        info?.desktopVersion ? h('p', { className: 'aic-muted' }, 'DSH Desktop 版本：', info.desktopVersion) : null,
         !info && !error ? h('p', { role: 'status' }, '正在检查当前桌面环境…') : null,
         info && !info.supported ? h('p', { role: 'alert', className: 'aic-error' }, info.message) : null,
         info?.onDiskEnabled ? h('p', null, '本机已准备好持久化存储。如聊天区仍提示临时存储，请完整退出并重新打开 DSH。') : null,
