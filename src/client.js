@@ -26,12 +26,17 @@ window.__ModuleLoader__.load({
     }
     function select(id) { save({ ...config, selected: id }) }
     const UpdatePanel = createUpdatePanel(React, async (action, payload = {}) => {
-      const response = await fetch(`/api/web-aichat/updates/${action}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) })
-      if (response.status === 404) throw Error('更新服务尚未加载，请完整退出并重新打开 DSH 后再试。')
+      const response = await fetch(`/api/web-aichat/updates/${action}`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload),
+      })
+      if (response.status === 404) throw Error('更新服务尚未加载，请按宿主提示启用插件或重启 DSH。')
       const data = await response.json()
-      if (!response.ok || !data.ok) throw Error(data.error || '无法连接版本更新服务。')
+      if (!response.ok || !data.ok) throw Error(data.error || '更新服务暂不可用。')
       return data
     })
+    function BundleSettings({ view }) {
+      return view === 'page' ? h(UpdatePanel) : null
+    }
     async function persistenceRequest(action) {
       const response = await fetch(`/api/web-aichat/persistence/${action}`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
@@ -136,7 +141,6 @@ window.__ModuleLoader__.load({
       const [, rerender] = React.useReducer(value => value + 1, 0)
       const [settings, setSettings] = React.useState(false)
       const [loginSetup, setLoginSetup] = React.useState(false)
-      const [updates, setUpdates] = React.useState(false)
       const [reopening, setReopening] = React.useState(false)
       const [epoch, setEpoch] = React.useState(0)
       const [notice, setNotice] = React.useState('')
@@ -168,7 +172,7 @@ window.__ModuleLoader__.load({
       React.useEffect(() => { listeners.add(rerender); rerender(); return () => listeners.delete(rerender) }, [])
       React.useEffect(() => {
         const host = hostRef.current
-        if (settings || loginSetup || updates || reopening || !host || !current.id) return
+        if (settings || loginSetup || reopening || !host || !current.id) return
         let alive = true
         manager.show(current.id, host)
         void manager.ensure(current).then(() => { if (alive) manager.show(current.id, host) })
@@ -184,7 +188,7 @@ window.__ModuleLoader__.load({
           window.removeEventListener('scroll', position, true)
           manager.hide(host)
         }
-      }, [current.id, settings, loginSetup, updates, reopening, epoch])
+      }, [current.id, settings, loginSetup, reopening, epoch])
       const reopen = async () => {
         setReopening(true)
         await manager.close(current.id)
@@ -248,9 +252,7 @@ window.__ModuleLoader__.load({
       return h('section', { className: 'aic-panel' },
         h('header', { className: 'aic-header' },
           h('div', { className: 'aic-brand' }, h(Icon, { size: 24 }), h('div', null, h('h1', null, 'AI Chat'), h('p', null, '常用 AI 官网，一个入口'))),
-          h('div', { className: 'aic-header-actions' },
-            h('button', { className: 'aic-button', disabled: reopening, onClick: () => { setLoginSetup(false); setSettings(false); setUpdates(value => !value) }, 'aria-expanded': updates }, '版本更新'),
-            h('button', { className: 'aic-button', disabled: reopening, onClick: () => { setLoginSetup(false); setUpdates(false); setSettings(value => !value) }, 'aria-expanded': settings }, settings ? '返回聊天' : '管理网站'))),
+          h('button', { className: 'aic-button', disabled: reopening, onClick: () => { setLoginSetup(false); setSettings(value => !value) }, 'aria-expanded': settings }, settings ? '返回聊天' : '管理网站')),
         h('nav', { className: 'aic-tabs', role: 'tablist', 'aria-label': 'AI Chat', onDragOver: scrollDrag,
           onDrop: event => { if (dragged.current) { event.preventDefault(); endDrag() } },
           onDragLeave: event => { if (!event.currentTarget.contains(event.relatedTarget)) setDropTarget(null) } },
@@ -271,10 +273,10 @@ window.__ModuleLoader__.load({
               reorder(dragged.current, item.id, dropPosition(event)); endDrag()
             },
             'aria-controls': 'aic-content', tabIndex: current.id === item.id ? 0 : -1,
-            onKeyDown: event => switchTab(event, item.id), onClick: () => { select(item.id); setSettings(false); setLoginSetup(false); setUpdates(false); setNotice('') } },
+            onKeyDown: event => switchTab(event, item.id), onClick: () => { select(item.id); setSettings(false); setLoginSetup(false); setNotice('') } },
           h('span', { className: 'aic-dot', style: { background: item.color } }), item.name))),
         h('p', { id: 'aic-sort-help', className: 'aic-sr-only' }, '拖动标签调整顺序并自动保存，也可按 Alt 加左右方向键移动当前标签。'),
-        updates ? h(UpdatePanel, { onDone: () => setUpdates(false) }) : loginSetup ? h(PersistenceSetup, { onDone: () => setLoginSetup(false) }) : settings ? h(WebsiteSettings, { onDone: () => setSettings(false) }) : h(React.Fragment, null,
+        loginSetup ? h(PersistenceSetup, { onDone: () => setLoginSetup(false) }) : settings ? h(WebsiteSettings, { onDone: () => setSettings(false) }) : h(React.Fragment, null,
           h('div', { className: 'aic-toolbar' },
             button('←', '后退', () => void manager.navigate(current.id, 'back')),
             button('→', '前进', () => void manager.navigate(current.id, 'forward')),
@@ -323,6 +325,10 @@ window.__ModuleLoader__.load({
         name: 'sidebar.panellist', id: PANEL, order: -1, label: () => 'AI Chat',
       }, Icon))
       ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: PANEL }, Panel))
+      // DSH renders this keyed slot inside this package's detail page, before source information.
+      ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
+        name: 'plugins.bundle.config', key: 'dsh-web-aichat',
+      }, BundleSettings))
     }
     return { inject: ['slots'], apply }
   },

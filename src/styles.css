@@ -58,9 +58,11 @@
 .aic-site-row small { display:block; color:var(--aic-subtle); padding-top:5px; overflow-wrap:anywhere; }
 .aic-muted,.aic-footnote { color:var(--aic-muted); }
 .aic-footnote { margin-top:28px; }
-.aic-header-actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
-.aic-updates .aic-settings-heading { max-width:none; }
-.aic-update-label { display:flex; justify-content:space-between; align-items:center; margin:18px 0; font-size:13px; color:var(--aic-muted); }
+.aic-detail-updates { display:block; height:auto; }
+.aic-detail-updates p { font-size:12px; line-height:1.7; }
+.aic-detail-updates .aic-footnote { margin-top:16px; }
+.aic-update-label { display:flex; justify-content:space-between; align-items:center; margin:0 0 14px; font-size:13px; color:var(--aic-muted); }
+.aic-update-label h2 { margin:0; font:inherit; }
 .aic-version-card { border:1px solid var(--aic-border); border-radius:16px; overflow:hidden; background:color-mix(in srgb, var(--dsw-alias-bg-layer-1, Canvas) 48%, transparent); }
 .aic-version-summary { display:flex; width:100%; gap:14px; align-items:center; padding:18px; border:0; background:var(--aic-hover); color:inherit; text-align:left; font:inherit; font-size:12px; cursor:pointer; }
 .aic-version-summary:focus-visible { outline:2px solid var(--aic-accent); outline-offset:-3px; }
@@ -72,5 +74,5 @@
 .aic-version-row time { color:var(--aic-muted); }
 .aic-version-badge { border:1px solid var(--aic-border); border-radius:6px; padding:2px 6px; font:10px sans-serif; color:var(--aic-muted); }
 .aic-updates a { font-size:12px; color:var(--aic-accent); }
-@media(max-width:480px) { .aic-version-row { gap:8px; padding:12px; } .aic-version-row time { font-size:10px; } .aic-header-actions { gap:4px; } }
+@media(max-width:480px) { .aic-version-row { gap:8px; padding:12px; } .aic-version-row time { font-size:10px; } }
 @media(max-width:600px) { .aic-header { padding:12px; } .aic-tabs { padding-left:10px; } .aic-toolbar { padding:8px 10px; } .aic-address { order:1; flex-basis:100%; padding-left:0; } .aic-status { padding:6px 10px; } }
