@@ -93,7 +93,7 @@ node scripts/desktop-persistence.mjs --restore "E:/DeepSeek Harness" "工具输�
 
 安装包内也包含此脚本，Release 提供独立副本作为手动备用方式。自动配置的任务及状态保存在 DSH 主目录的 `dsh-web-aichat/desktop-setup/`，备份位于原 `resources/app.asar` 旁。DSH 自身升级可能覆盖兼容修复；新版插件会重新检测支持情况，不会将旧补丁强行套用到未知版本。
 
-仓库名按项目要求使用 `dsh-web-AIchat`；npm 包名按命名规则使用小写 `dsh-web-aichat`。仓库与包均按私有开发设置，未发布到 npm。不要将私有 GitHub 链接当成已发布的 npm 安装包。
+仓库名按项目要求使用 `dsh-web-AIchat`；npm 包名按命名规则使用小写 `dsh-web-aichat`。仓库公开可访问，安装包通过 GitHub Release 提供，尚未发布到 npm。
 
 ## 开发
 
@@ -129,4 +129,4 @@ pnpm pack
 - [官方 Desktop guest 管理](https://github.com/deepseek-ai/deepseek-harness/blob/master/apps/desktop/src/browser-guests.ts)
 - [官方 Desktop browser bridge](https://github.com/deepseek-ai/deepseek-harness/blob/master/apps/desktop/src/preload-browser.ts)
 
-第三方参考的许可说明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。本项目新代码暂未授予开源许可；公开仓库前可另行选择许可证。
+第三方参考的许可说明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。本项目新代码暂未授予开源许可。
