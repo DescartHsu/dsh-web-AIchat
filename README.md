@@ -2,7 +2,7 @@
 
 DeepSeek Harness 插件：左侧栏一个「AI Chat」入口，主区域顶部切换不同 AI 的官网聊天页面。
 
-**当前代码版本：0.1.13，npm 首次发布准备中。** 使用各网站自己的账号与网页，不需要配置模型 API Key，不会把问题同时发送给多个模型。
+**当前代码版本：0.1.13，开发预览。** 使用各网站自己的账号与网页，不需要配置模型 API Key，不会把问题同时发送给多个模型。
 
 ## 功能
 
@@ -57,7 +57,7 @@ DeepSeek Harness 插件：左侧栏一个「AI Chat」入口，主区域顶部�
 
 ## 安装和原生更新
 
-npm 首次发布完成前，请继续使用现有版本。仓库中的 0.1.13 代码和本地安装包不代表 npm 已发布；发布状态可在 [npm 包页面](https://www.npmjs.com/package/dsh-web-aichat) 查询。
+首次安装前，请确认 [npm 包页面](https://www.npmjs.com/package/dsh-web-aichat) 已有目标版本。仓库代码和本地安装包不代表 npm 已发布；发布状态以包仓库为准。
 
 发布完成后，在 DSH Desktop 的 **插件 → 添加插件** 中输入包名：
 
@@ -118,7 +118,7 @@ node scripts/desktop-persistence.mjs --restore "E:/DeepSeek Harness" "工具输�
 
 安装包内也包含此脚本，Release 提供独立副本作为手动备用方式。自动配置的任务及状态保存在 DSH 主目录的 `dsh-web-aichat/desktop-setup/`，备份位于原 `resources/app.asar` 旁。DSH 自身升级可能覆盖兼容修复；新版插件会重新检测支持情况，不会将旧补丁强行套用到未知版本。
 
-仓库名使用 `dsh-web-AIchat`；npm 包名使用小写 `dsh-web-aichat`。仓库公开可访问，0.1.13 的 npm 首次发布准备尚待账号登录完成。
+仓库名使用 `dsh-web-AIchat`；npm 包名使用小写 `dsh-web-aichat`。仓库公开可访问，npm 实际可安装版本以包页面为准。
 
 ## 开发
 
