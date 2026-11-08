@@ -73,7 +73,7 @@ test('already persistent and unsupported hosts do not schedule automatic repair'
 
 test('upgrades retry old failures and replace old pending workers, but current-version failures remain stopped', () => temporary(async root => {
   const options = { platform: 'win32', root, assetRoot: fileURLToPath(new URL('../lib/', import.meta.url)),
-    detect: async () => 'D:/Harness', prepare: async () => ({ alreadyPatched: false, desktopVersion: '0.2.1-rc.5' }), launch: async () => {} }
+    detect: async () => 'D:/Harness', prepare: async () => ({ alreadyPatched: false, desktopVersion: '0.2.2-rc.1' }), launch: async () => {} }
   const service = createPersistenceService(options)
   const initial = await service.ensureAutomatic()
   const latestFile = join(root, 'latest.json'), previous = JSON.parse(await readFile(latestFile, 'utf8'))

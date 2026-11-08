@@ -57,7 +57,7 @@ test('ASAR replacement preserves all other files and metadata while rebuilding i
 })
 
 const native = await readFile(new URL('./fixtures/desktop-acquire.js', import.meta.url), 'utf8')
-test('rc.5 native acquire retains lease ownership and only persists AI Chat workspaces', () => {
+test('verified native acquire retains lease ownership and only persists AI Chat workspaces', () => {
   const context = vm.createContext({ randomUUID: () => 'random', session: { fromPartition: value => value } })
   const Guests = vm.runInContext(`${patchDesktopMain(native)}; Guests`, context)
   const owner = {}, guests = new Guests()
@@ -90,6 +90,7 @@ test('verified Desktop versions pass archive checks while unknown versions, layo
       assert.equal((await prepareDesktopPatch(root)).alreadyPatched, true)
     }
     await archive('0.2.1-rc.6'); await assert.rejects(prepareDesktopPatch(root), /Unsupported.*build/)
+    await archive('0.2.2-rc.2'); await assert.rejects(prepareDesktopPatch(root), /Unsupported.*build/)
     await archive('0.2.1-rc.5', native, 'different.js'); await assert.rejects(prepareDesktopPatch(root), /Unsupported.*build/)
     await archive('0.2.1-rc.5', 'unknown implementation'); await assert.rejects(prepareDesktopPatch(root), /refusing/)
     await archive('0.2.1-rc.5'); exe[exe.length - 4] = 49

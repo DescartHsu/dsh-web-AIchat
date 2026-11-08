@@ -1,6 +1,6 @@
 // DeepSeek Harness, MIT (see THIRD_PARTY_NOTICES.md).
 // Desktop 0.2.1-rc.5 compiled acquire method; browser-guests.ts and
-// preload-browser.ts match rc.3, rc.4, rc.5 and 0.2.2-alpha.2 byte-for-byte.
+// preload-browser.ts match rc.3, rc.4, rc.5, 0.2.2-alpha.2 and 0.2.2-rc.1 byte-for-byte.
 // https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-rc.5/apps/desktop/src/browser-guests.ts
 class Guests {
   partitions = new Map(); leases = new Map();
