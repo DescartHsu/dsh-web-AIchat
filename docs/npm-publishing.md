@@ -38,7 +38,9 @@
 
 ## DSH 首次迁移验收
 
-先备份 profile 的 package.json、pnpm-lock.yaml、pnpm-workspace.yaml 和 Cordis 配置（若存在）。用 DSH 自身的插件管理器将本地/GitHub tarball 来源替换为包名安装，不直接改正在运行的 profile。
+先备份 profile 的 package.json、pnpm-lock.yaml、pnpm-workspace.yaml 和 Cordis 配置（若存在）。通过 DSH 自身的管理工具将本地/GitHub tarball 来源替换为包名安装，不直接编辑正在运行的 profile。
+
+插件管理页面对已安装的同名包可能拒绝再次添加。已在 Windows DSH 0.2.2-rc.1 验证可通过自带 CLI 原地迁移，无需先卸载：`dsh plugin --profile desktop add dsh-web-aichat@0.1.13 --save-exact --registry=https://registry.npmjs.org/`。完成后正常退出、重新打开 DSH，核对运行版本和原生检查结果。
 
 核对本包的来源已是 registry、版本正确，其他依赖和配置没有被改动；启用并确认 AI Chat 入口。打开本插件详情，确认原生版本区自动检查。再核对网站、隐藏列表、排序与浏览器持久化存储。不要删除登录存储来迁移安装来源。
 
