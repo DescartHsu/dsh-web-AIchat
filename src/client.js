@@ -2,7 +2,6 @@ import { DEFAULT_PROVIDERS, readConfig, writeConfig, validateCustomProvider, nor
 import { createGuestManager } from './guest-manager.js'
 import css from './styles.css'
 import { watchHostTheme } from './theme.js'
-import { createUpdatePanel } from './update-panel.js'
 
 window.__ModuleLoader__.load({
   id: 'dsh-web-aichat',
@@ -25,18 +24,6 @@ window.__ModuleLoader__.load({
       return !storageNotice
     }
     function select(id) { save({ ...config, selected: id }) }
-    const UpdatePanel = createUpdatePanel(React, async (action, payload = {}) => {
-      const response = await fetch(`/api/web-aichat/updates/${action}`, {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload),
-      })
-      if (response.status === 404) throw Error('更新服务尚未加载，请按宿主提示启用插件或重启 DSH。')
-      const data = await response.json()
-      if (!response.ok || !data.ok) throw Error(data.error || '更新服务暂不可用。')
-      return data
-    })
-    function BundleSettings({ view }) {
-      return view === 'page' ? h(UpdatePanel) : null
-    }
     async function persistenceRequest(action) {
       const response = await fetch(`/api/web-aichat/persistence/${action}`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
@@ -325,10 +312,6 @@ window.__ModuleLoader__.load({
         name: 'sidebar.panellist', id: PANEL, order: -1, label: () => 'AI Chat',
       }, Icon))
       ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: PANEL }, Panel))
-      // DSH renders this keyed slot inside this package's detail page, before source information.
-      ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
-        name: 'plugins.bundle.config', key: 'dsh-web-aichat',
-      }, BundleSettings))
     }
     return { inject: ['slots'], apply }
   },

@@ -70,6 +70,10 @@ test('built client registers sidebar and main slots; UI switches, hides and rest
   try {
     assert.equal(slots.find(slot => slot.name === 'sidebar.panellist').id, 'web-aichat')
     assert.equal(slots.find(slot => slot.name === 'sidebar.panellist').label(), 'AI Chat')
+    // Version checking belongs to DSH's registry-based plugin manager.
+    assert.equal(slots.some(slot => slot.name.startsWith('plugins.')), false)
+    assert.equal(doc.querySelector('.aic-updates'), null)
+    assert.equal([...doc.querySelectorAll('button')].some(button => button.textContent === '版本更新'), false)
     assert.equal(doc.querySelectorAll('[role=tab]').length, 8)
     const deepseek = guest('deepseek')
     assert.ok(deepseek)
@@ -287,83 +291,5 @@ test('all sites can be deleted without reopening a hidden site, and the empty st
     await clickText('返回聊天')
     assert.equal(doc.querySelectorAll('[role=tab]').length, 1)
     assert.ok(doc.querySelector('[data-dsh-web-aichat=claude]'))
-  } finally { await fixture.finish() }
-})
-
-test('plugin detail version section checks and installs without losing chats; AI Chat has no standalone updater', async () => {
-  let installing = false; const calls = []
-  const info = () => ({ ok: true, runningVersion: '0.1.11', installedVersion: installing ? '0.1.12' : '0.1.11', canInstall: true,
-    job: installing ? { state: 'restart-required', message: '0.1.12 已安装，请完整退出并重新打开 DSH。' } : null,
-    releases: ['0.1.12', '0.1.11', '0.1.10'].map(version => ({ version, publishedAt: '2026-11-09T12:00:00Z' })) })
-  const fixture = await boot(true, async (url, options) => {
-    calls.push({ url, body: options.body })
-    if (url.endsWith('/install')) { installing = true; return { ok: true, json: async () => ({ ok: true, job: { state: 'installing', message: '正在安装…' } }) } }
-    return { ok: true, json: async () => info() }
-  })
-  try {
-    const { window, root, slots } = fixture, doc = window.document
-    const Detail = slots.find(slot => slot.name === 'plugins.bundle.config').component
-    const click = async text => { await act(async () => [...doc.querySelectorAll('button')].find(button => button.textContent === text).click()) }
-    const guest = doc.querySelector('[data-dsh-web-aichat=deepseek]')
-    await act(async () => guest.firstChild.dispatchEvent(new window.Event('dom-ready')))
-    const stored = window.localStorage.getItem('dsh-web-aichat:config:v1')
-    assert.equal([...doc.querySelectorAll('button')].some(button => button.textContent === '版本更新'), false)
-    assert.equal(calls.filter(call => call.url.includes('/updates/')).length, 0)
-    await act(async () => root.render(React.createElement(Detail, { view: 'page' })))
-    assert.match(doc.body.textContent, /可更新到 0.1.12/); assert.match(doc.body.textContent, /2026-11-09/)
-    assert.equal(guest.style.display, 'none'); assert.equal(doc.querySelectorAll('.aic-version-row').length, 3)
-    assert.equal(doc.querySelector('button[aria-label="当前版本 0.1.11"]').disabled, true)
-    await act(async () => doc.querySelector('button[aria-controls=aic-version-list]').click())
-    assert.equal(doc.querySelectorAll('.aic-version-row').length, 0)
-    await act(async () => doc.querySelector('button[aria-controls=aic-version-list]').click())
-    await click('↻ 重新检查')
-    assert.ok(calls.some(call => call.url.endsWith('/check')))
-    await act(async () => doc.querySelector('button[aria-label="安装版本 0.1.12"]').click())
-    assert.match(doc.body.textContent, /正在安装/)
-    assert.equal(doc.querySelector('button[aria-label="安装版本 0.1.10"]').disabled, true)
-    await act(async () => new Promise(resolve => setTimeout(resolve, 1700)))
-    assert.match(doc.body.textContent, /完整退出/)
-    assert.equal(JSON.parse(calls.find(call => call.url.endsWith('/install')).body).version, '0.1.12')
-    assert.equal([...doc.querySelectorAll('button')].some(button => button.textContent === '返回聊天'), false)
-    await act(async () => root.render(React.createElement(fixture.Panel)))
-    assert.equal(doc.querySelector('[data-dsh-web-aichat=deepseek]'), guest)
-    assert.equal(guest.firstChild.loads.length, 1); assert.equal(fixture.released.length, 0)
-    assert.equal(window.localStorage.getItem('dsh-web-aichat:config:v1'), stored)
-  } finally { await fixture.finish() }
-})
-
-test('failed update remains a failure rather than displaying an installed version', async () => {
-  const fixture = await boot(true, async url => url.endsWith('/install')
-    ? { ok: false, json: async () => ({ ok: false, error: '更新包校验失败' }) }
-    : { ok: true, json: async () => ({ ok: true, installedVersion: '0.1.11', runningVersion: '0.1.11', canInstall: true,
-      releases: [{ version: '0.1.12', publishedAt: '2026-11-09T00:00:00Z' }] }) })
-  try {
-    const doc = fixture.window.document
-    const Detail = fixture.slots.find(slot => slot.name === 'plugins.bundle.config').component
-    await act(async () => fixture.root.render(React.createElement(Detail, { view: 'page' })))
-    await act(async () => doc.querySelector('button[aria-label="安装版本 0.1.12"]').click())
-    assert.match(doc.body.textContent, /更新包校验失败/)
-    assert.match(doc.body.textContent, /当前安装 0.1.11/)
-    assert.doesNotMatch(doc.body.textContent, /0.1.12 已安装/)
-  } finally { await fixture.finish() }
-})
-
-test('update UI is keyed to its own bundle detail page and does not fetch in other views', async () => {
-  const calls = []
-  const fixture = await boot(false, async url => { calls.push(url); throw Error('unexpected fetch') })
-  try {
-    const entries = fixture.slots.filter(slot => slot.name === 'plugins.bundle.config')
-    assert.equal(entries.length, 1)
-    assert.equal(entries[0].key, 'dsh-web-aichat')
-    assert.equal(fixture.slots.some(slot => slot.name === 'plugins.detail.section'), false)
-    const Detail = entries[0].component
-    await act(async () => fixture.root.render(React.createElement(Detail, { view: 'dialog' })))
-    assert.equal(fixture.window.document.querySelector('.aic-updates'), null)
-    assert.deepEqual(calls, [])
-    await act(async () => fixture.root.render(React.createElement(Detail, { view: 'page' })))
-    assert.equal(calls.length, 1)
-    assert.match(calls[0], /\/updates\/status$/)
-    assert.match(fixture.window.document.body.textContent, /unexpected fetch/)
-    assert.equal(fixture.window.document.querySelector('.aic-detail-updates').parentElement.id, 'root')
   } finally { await fixture.finish() }
 })
