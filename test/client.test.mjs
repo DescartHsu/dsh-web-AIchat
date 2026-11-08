@@ -289,3 +289,56 @@ test('all sites can be deleted without reopening a hidden site, and the empty st
     assert.ok(doc.querySelector('[data-dsh-web-aichat=claude]'))
   } finally { await fixture.finish() }
 })
+
+test('version panel shows history, collapses, checks again, starts install and displays restart without losing chats', async () => {
+  let installing = false; const calls = []
+  const info = () => ({ ok: true, runningVersion: '0.1.11', installedVersion: installing ? '0.1.12' : '0.1.11', canInstall: true,
+    job: installing ? { state: 'restart-required', message: '0.1.12 已安装，请完整退出并重新打开 DSH。' } : null,
+    releases: ['0.1.12', '0.1.11', '0.1.10'].map(version => ({ version, publishedAt: '2026-11-09T12:00:00Z' })) })
+  const fixture = await boot(true, async (url, options) => {
+    calls.push({ url, body: options.body })
+    if (url.endsWith('/install')) { installing = true; return { ok: true, json: async () => ({ ok: true, job: { state: 'installing', message: '正在安装…' } }) } }
+    return { ok: true, json: async () => info() }
+  })
+  try {
+    const { window } = fixture, doc = window.document
+    const click = async text => { await act(async () => [...doc.querySelectorAll('button')].find(button => button.textContent === text).click()) }
+    const guest = doc.querySelector('[data-dsh-web-aichat=deepseek]')
+    await act(async () => guest.firstChild.dispatchEvent(new window.Event('dom-ready')))
+    const stored = window.localStorage.getItem('dsh-web-aichat:config:v1')
+    await click('版本更新')
+    assert.match(doc.body.textContent, /可更新到 0.1.12/); assert.match(doc.body.textContent, /2026-11-09/)
+    assert.equal(guest.style.display, 'none'); assert.equal(doc.querySelectorAll('.aic-version-row').length, 3)
+    assert.equal(doc.querySelector('button[aria-label="当前版本 0.1.11"]').disabled, true)
+    await act(async () => doc.querySelector('button[aria-controls=aic-version-list]').click())
+    assert.equal(doc.querySelectorAll('.aic-version-row').length, 0)
+    await act(async () => doc.querySelector('button[aria-controls=aic-version-list]').click())
+    await click('↻ 重新检查')
+    assert.ok(calls.some(call => call.url.endsWith('/check')))
+    await act(async () => doc.querySelector('button[aria-label="安装版本 0.1.12"]').click())
+    assert.match(doc.body.textContent, /正在安装/)
+    assert.equal(doc.querySelector('button[aria-label="安装版本 0.1.10"]').disabled, true)
+    await act(async () => new Promise(resolve => setTimeout(resolve, 1700)))
+    assert.match(doc.body.textContent, /完整退出/)
+    assert.equal(JSON.parse(calls.find(call => call.url.endsWith('/install')).body).version, '0.1.12')
+    await click('返回聊天')
+    assert.equal(doc.querySelector('[data-dsh-web-aichat=deepseek]'), guest)
+    assert.equal(guest.firstChild.loads.length, 1); assert.equal(fixture.released.length, 0)
+    assert.equal(window.localStorage.getItem('dsh-web-aichat:config:v1'), stored)
+  } finally { await fixture.finish() }
+})
+
+test('failed update remains a failure rather than displaying an installed version', async () => {
+  const fixture = await boot(true, async url => url.endsWith('/install')
+    ? { ok: false, json: async () => ({ ok: false, error: '更新包校验失败' }) }
+    : { ok: true, json: async () => ({ ok: true, installedVersion: '0.1.11', runningVersion: '0.1.11', canInstall: true,
+      releases: [{ version: '0.1.12', publishedAt: '2026-11-09T00:00:00Z' }] }) })
+  try {
+    const doc = fixture.window.document
+    await act(async () => [...doc.querySelectorAll('button')].find(button => button.textContent === '版本更新').click())
+    await act(async () => doc.querySelector('button[aria-label="安装版本 0.1.12"]').click())
+    assert.match(doc.body.textContent, /更新包校验失败/)
+    assert.match(doc.body.textContent, /当前安装 0.1.11/)
+    assert.doesNotMatch(doc.body.textContent, /0.1.12 已安装/)
+  } finally { await fixture.finish() }
+})
