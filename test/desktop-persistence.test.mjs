@@ -90,10 +90,10 @@ test('verified Desktop versions pass archive checks while unknown versions, layo
       assert.equal((await prepareDesktopPatch(root)).alreadyPatched, true)
     }
     await archive('0.2.1-rc.6'); await assert.rejects(prepareDesktopPatch(root), /Unsupported.*build/)
-    await archive('0.2.2-rc.2'); await assert.rejects(prepareDesktopPatch(root), /Unsupported.*build/)
+    await archive('0.2.2-rc.4'); await assert.rejects(prepareDesktopPatch(root), /Unsupported.*build/)
     await archive('0.2.1-rc.5', native, 'different.js'); await assert.rejects(prepareDesktopPatch(root), /Unsupported.*build/)
-    await archive('0.2.1-rc.5', 'unknown implementation'); await assert.rejects(prepareDesktopPatch(root), /refusing/)
-    await archive('0.2.1-rc.5'); exe[exe.length - 4] = 49
+    await archive('0.2.2-rc.3', 'unknown implementation'); await assert.rejects(prepareDesktopPatch(root), /refusing/)
+    await archive('0.2.2-rc.3'); exe[exe.length - 4] = 49
     await writeFile(join(root, 'DeepSeek Harness.exe'), exe)
     await assert.rejects(prepareDesktopPatch(root), /validation is enabled/)
   } finally { assert.equal(dirname(resolve(root)), base); await rm(root, { recursive: true, force: true }) }

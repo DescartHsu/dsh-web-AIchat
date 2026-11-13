@@ -13,7 +13,7 @@ try { nativeFileSystem = createRequire(import.meta.url)('original-fs').promises 
 const { readFile, writeFile, copyFile, rename } = nativeFileSystem
 
 const MARKER = '/* dsh-web-aichat: persistent partitions v1 */'
-export const SUPPORTED_DESKTOP_VERSIONS = Object.freeze(['0.2.1-rc.3', '0.2.1-rc.4', '0.2.1-rc.5', '0.2.2-alpha.2', '0.2.2-rc.1'])
+export const SUPPORTED_DESKTOP_VERSIONS = Object.freeze(['0.2.1-rc.3', '0.2.1-rc.4', '0.2.1-rc.5', '0.2.2-alpha.2', '0.2.2-rc.1', '0.2.2-rc.2', '0.2.2-rc.3'])
 const sha256 = value => createHash('sha256').update(value).digest('hex')
 export function parseArchive(bytes) {
   const length = bytes.readUInt32LE(12)

@@ -2,7 +2,7 @@
 
 DeepSeek Harness 插件：左侧栏一个「AI Chat」入口，主区域顶部切换不同 AI 的官网聊天页面。
 
-**当前代码版本：0.1.13，开发预览。** 使用各网站自己的账号与网页，不需要配置模型 API Key，不会把问题同时发送给多个模型。
+**当前代码版本：0.1.14，开发预览。** 使用各网站自己的账号与网页，不需要配置模型 API Key，不会把问题同时发送给多个模型。
 
 ## 功能
 
@@ -14,7 +14,7 @@ DeepSeek Harness 插件：左侧栏一个「AI Chat」入口，主区域顶部�
 - 后退、前进、刷新、返回首页、复制网址、重新打开当前页面。
 - 「管理网站」可添加 HTTPS 网站、删除内置或自定义网站；删除结果、排序和当前选择自动保存。已删除的内置网站可单独恢复，删除入口不会清除官网登录数据。
 - 每个网站使用独立的原生网页容器和存储分区。
-- Windows DSH Desktop 0.2.1-rc.3 / rc.4 / rc.5 及 0.2.2-alpha.2 / 0.2.2-rc.1 上自动配置登录保留，无需点击修复。插件加载后自动准备，首次完整退出后备份、启用持久化存储并自动重开一次。之后保留 Cookie（含 HttpOnly）、localStorage 和 IndexedDB；面板按实际分区显示是否已启用。
+- Windows DSH Desktop 0.2.1-rc.3 / rc.4 / rc.5 及 0.2.2-alpha.2 / rc.1 / rc.2 / rc.3 上自动配置登录保留，无需点击修复。插件加载后自动准备，首次完整退出后备份、启用持久化存储并自动重开一次。之后保留 Cookie（含 HttpOnly）、localStorage 和 IndexedDB；面板按实际分区显示是否已启用。
 - 网页请求打开新窗口时显示链接，由用户选择是否在当前页打开。
 - 插件面板及官网内部的中性背景、常见内容区和输入框背景透明，透出宿主皮肤和背景。
 - 网页文字、边框、标签选中态和按钮使用 DSH 皮肤变量，跟随宿主主题即时变化；动态添加的网页内容也会自动适配。
@@ -23,7 +23,7 @@ DeepSeek Harness 插件：左侧栏一个「AI Chat」入口，主区域顶部�
 
 ## 环境与限制
 
-需要提供 `dshDesktop.protocolVersion === 1` 和 `dshDesktop.browser` 的官方 **DSH Desktop**。接口已对照 `0.2.1-rc.3`、`0.2.1-rc.4`、`0.2.1-rc.5`、`0.2.2-alpha.2`、`0.2.2-rc.1` 的官方 Desktop Browser guest 源码及本机 rc.1 安装验证。普通浏览器版 DSH 只能选择网站和复制网址，不会尝试 iframe 嵌入。
+需要提供 `dshDesktop.protocolVersion === 1` 和 `dshDesktop.browser` 的官方 **DSH Desktop**。接口已对照 `0.2.1-rc.3`、`0.2.1-rc.4`、`0.2.1-rc.5`、`0.2.2-alpha.2`、`0.2.2-rc.1`、`0.2.2-rc.2`、`0.2.2-rc.3` 的官方 Desktop Browser guest 源码及本机 rc.1 安装验证。普通浏览器版 DSH 只能选择网站和复制网址，不会尝试 iframe 嵌入。
 
 原版 DSH Desktop 0.2.1-rc.3 将 Browser guest 强制放在内存分区，仅更新网页代码无法解决重启后退出登录。0.1.6 在插件加载时自动准备针对该版本的兼容修复，无需打开设置页或点击按钮；只将 `dsh-web-aichat:<网站标识>` 分区改成稳定的 `persist:` 分区。其他浏览器分区及宿主隔离策略不变。网站通过 Chromium 原生存储保留登录数据，插件不导出、复制或回放登录令牌。
 
@@ -45,13 +45,15 @@ DeepSeek Harness 插件：左侧栏一个「AI Chat」入口，主区域顶部�
 
 0.1.6 已在新的未修复 Windows 安装副本中验证：插件加载后自动准备，全程未调用准备接口或点击修复；完整退出后自动完成设置并重新打开，再次完整启动后 HttpOnly Cookie、localStorage 和 IndexedDB 均保留。测试另外覆盖长时间使用、插件停用、加载过程中卸载和失败后停止自动重试。
 
-## 桌面兼容性（0.1.10）
+## 桌面兼容性（0.1.14）
 
-本版本适配 [DSH 0.2.2-rc.1](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.2-rc.1)。登录存储工具显式支持 0.2.1-rc.3、rc.4、rc.5、0.2.2-alpha.2 和 0.2.2-rc.1；版本不在列表内或分区实现、主入口、完整性配置不匹配时仍拒绝修改。
+本版本适配 [DSH 0.2.2-rc.3](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.2-rc.3)，同时补上 rc.2。登录存储工具显式支持 0.2.1-rc.3、rc.4、rc.5、0.2.2-alpha.2、0.2.2-rc.1、rc.2 和 rc.3；版本不在列表内或分区实现、主入口、完整性配置不匹配时仍拒绝修改。
 
-上述五个官方 tag 的 `browser-guests.ts` 与 `preload-browser.ts` 内容分别完全相同。rc.5 已使用本机发行版的原始 guest 代码和 Electron 可执行程序，在隔离测试目录验证自动配置及跨重启存储；rc.4 和 alpha.2 通过源码对照及版本/归档测试，尚未逐一做完整桌面运行验收。
+上述七个官方 tag 的 `browser-guests.ts` 与 `preload-browser.ts` 内容分别完全相同。rc.5 已使用本机发行版的原始 guest 代码和 Electron 可执行程序，在隔离测试目录验证自动配置及跨重启存储；rc.4 和 alpha.2 通过源码对照及版本/归档测试，尚未逐一做完整桌面运行验收。
 
 0.2.2-rc.1 已使用本机发行版的原始 guest 代码与 Electron 可执行程序，在独立测试安装目录验证自动准备、备份、修改、自动重开，以及再次完整启动后的 HttpOnly Cookie、localStorage 和 IndexedDB 保留。检查同时确认 Host HTTP 路由、认证方法及关闭消息仍兼容。未对各官网真实账号逐一做登录验收。
+
+0.2.2-rc.3 使用官方 tag 中的 `browser-guests.ts` 编译构建隔离安装测试，运行于本机 Electron 44.7.0：验证全新安装的自动准备、退出后备份修复、自动重开，以及另一个操作系统进程中保留带唯一 PID 值的 HttpOnly Cookie、localStorage 和 IndexedDB。rc.2 通过相同源码对照及版本/归档检查。新版侧栏仍支持现有 `sidebar.panellist` 和 `main` 注册接口，入口固定/收纳由宿主管理。本机完整宿主仍为 rc.1，未升级用户 DSH；这些检查不等同于 rc.3 完整桌面应用及各官网真实账号的逐站验收。
 
 升级插件或 DSH 后，旧版本留下的失败或等待任务会重新评估；相同插件和宿主版本的失败仍停止自动重试。网站、删除列表、标签顺序及皮肤设置保持原有配置格式。状态页现在显示检测到的 DSH 版本。
 
@@ -91,13 +93,13 @@ pnpm test
 pnpm pack
 ```
 
-生成的 `dsh-web-aichat-0.1.13.tgz` 可供离线安装和开发验证。通过 tgz 或项目目录安装时，DSH 0.2.2-rc.1 不提供包仓库原生版本更新区，日后需手动更新或迁移到包名安装。
+生成的 `dsh-web-aichat-0.1.14.tgz` 可供离线安装和开发验证。通过 tgz 或项目目录安装时，DSH 不提供包仓库原生版本更新区，日后需手动更新或迁移到包名安装。
 
 维护者首次发布步骤见 [npm 发布说明](docs/npm-publishing.md)。
 
 ### 自动保留登录
 
-支持 Windows 官方 DSH Desktop 0.2.1-rc.3、0.2.1-rc.4、0.2.1-rc.5、0.2.2-alpha.2、0.2.2-rc.1，无需单独下载脚本或安装 Node.js：
+支持 Windows 官方 DSH Desktop 0.2.1-rc.3、0.2.1-rc.4、0.2.1-rc.5、0.2.2-alpha.2、0.2.2-rc.1、0.2.2-rc.2、0.2.2-rc.3，无需单独下载脚本或安装 Node.js：
 
 1. 安装或更新插件，按宿主提示启用或重启，使新版插件加载；插件会自动准备首次配置，不需要点击修复或进入设置页。
 2. 如果 AI Chat 显示首次设置提示，完成运行中的任务，从 **应用 → 退出** 完整退出 DSH。工具会自动备份、完成配置并重新打开一次；仅关闭窗口可能仍在托盘运行。
