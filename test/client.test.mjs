@@ -146,51 +146,62 @@ test('built client has a usable fallback when the Desktop bridge is absent', asy
   } finally { await fixture.finish() }
 })
 
-test('when persistent storage is unavailable, the site opens immediately and keeps its temporary guest across tabs', async () => {
+test('memory-only reservations are released without mounting a site, including after switching tabs', async () => {
   const fixture = await boot(true, async () => ({ ok: true, status: 200,
     json: async () => ({ ok: true, supported: false, message: '网页存储实现已变更' }) }), false)
   try {
-    const { window } = fixture
-    const doc = window.document
-    const guest = () => doc.querySelector('[data-dsh-web-aichat=deepseek] webview')
-    const opened = guest()
-    assert.ok(opened)
-    assert.equal(fixture.released.length, 0)
-    await act(async () => {
-      opened.dispatchEvent(new window.Event('dom-ready'))
-      opened.dispatchEvent(new window.Event('did-stop-loading'))
-    })
-    assert.deepEqual(opened.loads, ['https://chat.deepseek.com/'])
-    assert.match(doc.querySelector('.aic-status').textContent, /临时会话/)
+    const doc = fixture.window.document
+    assert.equal(doc.querySelector('webview'), null)
+    assert.match(doc.body.textContent, /当前桌面版本无法在这里打开网页/)
+    assert.doesNotMatch(doc.body.textContent, /存储|分区/)
     await act(async () => doc.getElementById('aic-tab-chatgpt').click())
-    assert.ok(doc.querySelector('[data-dsh-web-aichat=chatgpt] webview'))
     await act(async () => doc.getElementById('aic-tab-deepseek').click())
-    assert.equal(guest(), opened)
+    assert.equal(doc.querySelector('webview'), null)
+    assert.deepEqual(fixture.released, ['lease-1', 'lease-2', 'lease-3'])
   } finally { await fixture.finish() }
 })
 
-test('pending automatic setup does not gate the chat and stays available in the status panel', async () => {
+test('only a fresh persistent reservation opens the provider after a retry in the same plugin', async () => {
+  const fixture = await boot(true, async () => ({ ok: true, status: 200,
+    json: async () => ({ ok: true, supported: true, onDiskEnabled: true }) }), false)
+  try {
+    const doc = fixture.window.document
+    const retry = async () => {
+      const button = [...doc.querySelectorAll('button')].find(item => item.textContent === '重新打开')
+      await act(async () => button.click())
+    }
+    assert.match(doc.body.textContent, /完整退出 DSH/)
+    await retry()
+    assert.equal(doc.querySelector('webview'), null)
+    assert.doesNotMatch(doc.body.textContent, /登录状态自动保留/)
+    fixture.window.dshDesktop.browser.acquire = async workspace => ({ lease: 'restored', partition: `persist:${workspace}` })
+    await retry()
+    const guest = doc.querySelector('webview')
+    assert.equal(guest.getAttribute('partition'), 'persist:dsh-web-aichat:deepseek')
+    await act(async () => guest.dispatchEvent(new fixture.window.Event('dom-ready')))
+    assert.deepEqual(guest.loads, ['https://chat.deepseek.com/'])
+    await act(async () => guest.dispatchEvent(new fixture.window.Event('did-stop-loading')))
+    assert.equal(doc.querySelector('.aic-status'), null)
+    assert.doesNotMatch(doc.body.textContent, /登录存储|登录状态自动保留|分区|完整退出 DSH/)
+    assert.deepEqual(fixture.released, ['lease-1', 'lease-2'])
+  } finally { await fixture.finish() }
+})
+
+test('a failed background setup offers a plain retry and displays only the next action', async () => {
   const calls = []
-  const fixture = await boot(true, async (url, options) => {
-    calls.push({ url, method: options.method })
-    return { ok: true, status: 200, json: async () => ({ ok: true, supported: true, installDirectory: 'D:/Apps/Harness', onDiskEnabled: false,
-      job: { state: 'waiting', automatic: true, message: '登录存储已自动准备，无需点击修复，完整退出后将自动重开一次。' } }) }
+  const fixture = await boot(true, async url => {
+    calls.push(url.split('/').pop())
+    return { ok: true, json: async () => ({ ok: true, supported: true, installDirectory: 'private-path',
+      job: { state: calls.length === 1 ? 'failed' : 'waiting', message: 'technical details' } }) }
   }, false)
   try {
     const doc = fixture.window.document
-    const click = async text => { const button = [...doc.querySelectorAll('button')].find(item => item.textContent === text); assert.ok(button, text); await act(async () => button.click()) }
-    const opened = doc.querySelector('webview')
-    assert.ok(opened)
-    assert.match(doc.querySelector('.aic-status').textContent, /临时会话/)
-    assert.deepEqual(calls, [])
-    await click('登录存储状态')
-    assert.match(doc.body.textContent, /D:\/Apps\/Harness/)
-    assert.match(doc.body.textContent, /已自动准备/)
-    assert.equal([...doc.querySelectorAll('button')].some(item => /启用登录保留|准备修复|重试自动设置/.test(item.textContent)), false)
-    assert.equal(calls.filter(call => call.url.endsWith('/prepare')).length, 0)
-    assert.doesNotMatch(doc.body.textContent, /登录状态自动保留/)
-    await click('返回聊天')
-    assert.equal(doc.querySelector('webview'), opened)
+    const retry = [...doc.querySelectorAll('button')].find(item => item.textContent === '重试')
+    await act(async () => retry.click())
+    assert.deepEqual(calls, ['status', 'prepare'])
+    assert.match(doc.body.textContent, /再打开 DSH/)
+    assert.doesNotMatch(doc.body.textContent, /private-path|technical details|存储|分区/)
+    assert.equal(doc.querySelector('webview'), null)
   } finally { await fixture.finish() }
 })
 

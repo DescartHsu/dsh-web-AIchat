@@ -1,72 +1,66 @@
 /** Detached, single-use worker: patch only after Desktop has fully exited. */
 import { readFile, writeFile, rename, access } from 'node:fs/promises'
-import { execFileSync, spawn } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { applyDesktopPatch } from './desktop-persistence.mjs'
+import { desktopProcessIds, stageDesktopPatch } from './desktop-persistence.mjs'
 
 export async function writeState(file, value) {
   const temporary = `${file}.${process.pid}.tmp`
   await writeFile(temporary, JSON.stringify(value), { mode: 0o600 })
   await rename(temporary, file)
 }
-export function desktopRunning(directory) {
-  const output = execFileSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
-    'Get-Process -Name "DeepSeek Harness" -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $env:DSH_AICHAT_NATIVE_TARGET -and $_.Id -ne [int]$env:DSH_AICHAT_REPAIR_PID } | Select-Object -ExpandProperty Id; exit 0'],
-  { windowsHide: true, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: {
-    ...process.env, DSH_AICHAT_NATIVE_TARGET: join(directory, 'DeepSeek Harness.exe'), DSH_AICHAT_REPAIR_PID: String(process.pid),
-  } })
-  return !!output.trim()
+function trackDesktop(directory) {
+  const pids = desktopProcessIds(directory)
+  return () => pids.some(pid => {
+    try { process.kill(pid, 0); return true } catch (error) { return error.code === 'EPERM' }
+  })
 }
-export function reopenDesktop(directory) {
+export async function reopenDesktop(directory) {
+  if (desktopProcessIds(directory).length) return
   const environment = { ...process.env }
   delete environment.ELECTRON_RUN_AS_NODE
   const child = spawn(join(directory, 'DeepSeek Harness.exe'), [], {
     detached: true, windowsHide: false, stdio: 'ignore', env: environment,
   })
-  child.on('error', () => {})
-  child.unref()
+  await new Promise((resolve, reject) => {
+    child.once('error', reject)
+    child.once('spawn', () => { child.unref(); resolve() })
+  })
 }
 export async function runRepairJob(job, dependencies = {}) {
-  const running = dependencies.running || desktopRunning
-  const apply = dependencies.apply || applyDesktopPatch
+  const stage = dependencies.stage || stageDesktopPatch
   const reopen = dependencies.reopen || reopenDesktop
   const sleep = dependencies.sleep || (ms => new Promise(resolve => setTimeout(resolve, ms)))
   const now = dependencies.now || Date.now
-  const ownerAlive = dependencies.ownerAlive || (pid => { try { process.kill(pid, 0); return true } catch { return false } })
   const save = value => writeState(job.statusFile, { jobId: job.id, automatic: !!job.automatic, updatedAt: now(), ...value })
   const cancelled = async () => {
     if (!job.cancelFile) return false
     try { await access(job.cancelFile); return true } catch { return false }
   }
-  await save({ state: 'waiting', message: job.automatic
-    ? '已安排在下次正常退出 DSH 时配置登录保留，完成后会自动重开一次。'
-    : '准备就绪，请从 DSH 的“应用 → 退出”完整退出。退出后将自动修复并重新打开。' })
-  while (job.automatic || now() < job.expiresAt) {
-    if (await cancelled()) { await save({ state: 'cancelled', message: '插件已停用或重新加载，本次自动设置已取消。' }); return }
-    // The Host stays alive while Desktop is in use. Avoid launching PowerShell
-    // every second during long sessions; inspect all Desktop processes on exit.
-    if (job.automatic && job.ownerPid && ownerAlive(job.ownerPid)) { await sleep(1000); continue }
-    if (!running(job.installDirectory)) {
-      // Avoid replacing a file while child processes are still shutting down.
-      await sleep(1000)
-      if (!running(job.installDirectory) && !await cancelled()) {
-        await save({ state: 'applying', message: '正在备份并启用登录保留…' })
-        try {
-          const result = await apply(job.installDirectory)
-          await save({ state: 'complete', message: '登录保留配置已完成。需要时可在官网登录。', backup: result.backup || null })
-          reopen(job.installDirectory)
-          return
-        } catch (error) {
-          await save({ state: 'failed', message: `修复未完成：${error.message}` })
-          if (!job.automatic) reopen(job.installDirectory)
-          return
-        }
+  let staged
+  try {
+    if (await cancelled()) { await save({ state: 'cancelled', message: '插件已停用。' }); return }
+    staged = await stage(job.installDirectory, { watchExit: true })
+    const running = dependencies.running || trackDesktop(job.installDirectory)
+    await save({ state: 'waiting', message: '已准备好，请从「应用 → 退出」完整退出 DSH。' })
+    while (job.automatic || now() < job.expiresAt) {
+      if (await cancelled()) { await save({ state: 'cancelled', message: '插件已停用或重新加载。' }); return }
+      if (!running()) {
+        await save({ state: 'applying', message: '正在完成设置…' })
+        if (await cancelled()) { await save({ state: 'cancelled', message: '插件已重新加载。' }); return }
+        const result = await staged.commit()
+        await save({ state: 'complete', message: '已完成。', backup: result.backup || null })
+        await reopen(job.installDirectory)
+        return
       }
+      await sleep(100)
     }
-    await sleep(1000)
-  }
-  await save({ state: 'expired', message: '等待退出已超时，未修改 DSH。需要时请重新准备修复。' })
+    await save({ state: 'expired', message: '等待退出超时。' })
+  } catch (error) {
+    await save({ state: 'failed', message: `修复未完成：${error.message}` })
+    if (!job.automatic && staged && !(dependencies.running || trackDesktop(job.installDirectory))()) await reopen(job.installDirectory)
+  } finally { await staged?.discard() }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

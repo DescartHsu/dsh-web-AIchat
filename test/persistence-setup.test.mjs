@@ -30,6 +30,7 @@ test('a fresh installation prepares both bundled worker files without a separate
       job = JSON.parse(await readFile(file, 'utf8'))
       assert.match(await readFile(worker, 'utf8'), /runRepairJob/)
       assert.match(await readFile(join(dirname(worker), 'desktop-persistence.mjs'), 'utf8'), /applyDesktopPatch/)
+      return process.pid
     },
   })
   assert.equal((await service.status()).onDiskEnabled, false)
@@ -50,7 +51,7 @@ test('automatic activation prepares once without a 15-minute limit and leaves fa
   let launched = 0, job
   const service = createPersistenceService({ platform: 'win32', root, assetRoot: fileURLToPath(new URL('../lib/', import.meta.url)),
     detect: async () => 'D:/Harness', prepare: async () => ({ alreadyPatched: false }),
-    launch: async (_directory, _worker, file) => { launched++; job = JSON.parse(await readFile(file, 'utf8')) },
+    launch: async (_directory, _worker, file) => { launched++; job = JSON.parse(await readFile(file, 'utf8')); return process.pid },
   })
   const prepared = await service.ensureAutomatic()
   assert.equal(prepared.job.automatic, true); assert.equal(job.expiresAt, null)
@@ -73,7 +74,7 @@ test('already persistent and unsupported hosts do not schedule automatic repair'
 
 test('upgrades retry old failures and replace old pending workers, but current-version failures remain stopped', () => temporary(async root => {
   const options = { platform: 'win32', root, assetRoot: fileURLToPath(new URL('../lib/', import.meta.url)),
-    detect: async () => 'D:/Harness', prepare: async () => ({ alreadyPatched: false, desktopVersion: '0.2.2-rc.1' }), launch: async () => {} }
+    detect: async () => 'D:/Harness', prepare: async () => ({ alreadyPatched: false, desktopVersion: '0.2.2-rc.1' }), launch: async () => process.pid }
   const service = createPersistenceService(options)
   const initial = await service.ensureAutomatic()
   const latestFile = join(root, 'latest.json'), previous = JSON.parse(await readFile(latestFile, 'utf8'))
@@ -91,10 +92,24 @@ test('upgrades retry old failures and replace old pending workers, but current-v
   assert.equal((await createPersistenceService(options).ensureAutomatic()).job.jobId, current.id)
 }))
 
+test('restarting the plugin replaces a dead worker reported as waiting', () => temporary(async root => {
+  const options = { platform: 'win32', root, assetRoot: fileURLToPath(new URL('../lib/', import.meta.url)),
+    detect: async () => 'D:/Harness', prepare: async () => ({ alreadyPatched: false, desktopVersion: 'test' }),
+    launch: async () => 101, workerAlive: () => false }
+  const first = await createPersistenceService(options).ensureAutomatic()
+  const old = JSON.parse(await readFile(join(root, 'latest.json'), 'utf8'))
+  await writeFile(old.statusFile, JSON.stringify({ jobId: old.id, state: 'waiting' }))
+  const reloaded = createPersistenceService({ ...options, launch: async () => 102, workerAlive: pid => pid === 102 })
+  assert.equal((await reloaded.status()).job.state, 'interrupted')
+  const next = await reloaded.ensureAutomatic()
+  assert.notEqual(next.job.jobId, first.job.jobId)
+  assert.equal(await readFile(old.cancelFile, 'utf8'), '')
+  assert.equal((await reloaded.ensureAutomatic()).job.jobId, next.job.jobId)
+}))
 test('different Desktop installations do not reuse each other jobs or block cancellation', () => temporary(async root => {
   const make = directory => createPersistenceService({ platform: 'win32', root,
     assetRoot: fileURLToPath(new URL('../lib/', import.meta.url)), detect: async () => directory,
-    prepare: async () => ({ alreadyPatched: false }), launch: async () => {},
+    prepare: async () => ({ alreadyPatched: false }), launch: async () => process.pid,
   })
   const first = make('D:/Harness'), second = make('E:/Harness')
   const one = await first.ensureAutomatic()
@@ -126,23 +141,41 @@ test('repair worker waits for full exit, applies once, records backup and reopen
   let checks = 0, applied = 0, reopened = 0, clock = 0
   const job = { id: 'fixture', installDirectory: 'D:/Harness', statusFile: join(root, 'status.json'), expiresAt: 10000 }
   await runRepairJob(job, { running: () => ++checks < 3, sleep: async ms => { clock += ms }, now: () => clock,
-    apply: async directory => { assert.equal(directory, job.installDirectory); applied++; return { backup: 'verified-backup' } },
+    stage: async directory => ({ discard: async () => {}, commit: async () => { assert.equal(directory, job.installDirectory); applied++; return { backup: 'verified-backup' } } }),
     reopen: () => { assert.equal(applied, 1); reopened++ },
   })
   const state = JSON.parse(await readFile(job.statusFile, 'utf8'))
   assert.equal(state.state, 'complete'); assert.equal(state.backup, 'verified-backup')
   assert.equal(applied, 1); assert.equal(reopened, 1)
 }))
+test('manual relaunch 300ms after quit sees the prepared change on its first launch', () => temporary(async root => {
+  let clock = 0, committedAt, discarded = 0
+  const quitAt = 1200, relaunchAt = quitAt + 300
+  const job = { id: 'quick-reopen', automatic: true, installDirectory: 'D:/Harness', statusFile: join(root, 'status.json') }
+  await runRepairJob(job, {
+    now: () => clock, sleep: async ms => { clock += ms; assert.ok(clock < relaunchAt, 'missed the relaunch') },
+    running: () => clock < quitAt || clock >= relaunchAt,
+    stage: async () => {
+      clock += 800 // preparing the archive after quit would miss the whole window
+      assert.ok(clock < quitAt)
+      return { commit: async () => { committedAt = clock; return {} }, discard: async () => { discarded++ } }
+    },
+    reopen: async () => {},
+  })
+  assert.ok(committedAt >= quitAt && committedAt < relaunchAt)
+  assert.equal(discarded, 1)
+  assert.equal(JSON.parse(await readFile(job.statusFile, 'utf8')).state, 'complete')
+}))
 test('waiting expiry and repair failures remain visible instead of reporting login retention', () => temporary(async root => {
   let clock = 0, reopened = 0
   const job = { id: 'fixture', installDirectory: 'D:/Harness', statusFile: join(root, 'status.json'), expiresAt: 2000 }
   await runRepairJob(job, { running: () => true, sleep: async ms => { clock += ms }, now: () => clock,
-    apply: async () => { throw Error('must not apply') }, reopen: () => { reopened++ },
+    stage: async () => ({ discard: async () => {}, commit: async () => { throw Error('must not apply') } }), reopen: () => { reopened++ },
   })
   assert.equal(JSON.parse(await readFile(job.statusFile, 'utf8')).state, 'expired')
   assert.equal(reopened, 0)
   await runRepairJob({ ...job, expiresAt: 9000 }, { running: () => false, sleep: async () => {}, now: () => 0,
-    apply: async () => { throw Error('Access denied') }, reopen: () => { reopened++ },
+    stage: async () => ({ discard: async () => {}, commit: async () => { throw Error('Access denied') } }), reopen: () => { reopened++ },
   })
   const state = JSON.parse(await readFile(job.statusFile, 'utf8'))
   assert.equal(state.state, 'failed'); assert.match(state.message, /Access denied/); assert.equal(reopened, 1)
@@ -153,10 +186,10 @@ test('automatic worker completes after long sessions, honours cancellation and d
     statusFile: join(root, 'status.json'), cancelFile: join(root, 'cancel') }
   let applied = 0, reopened = 0
   const dependencies = { running: () => false, sleep: async () => {}, now: () => 7 * 86400000,
-    apply: async () => { applied++; return { backup: 'backup' } }, reopen: () => { reopened++ } }
+    stage: async () => ({ discard: async () => {}, commit: async () => { applied++; return { backup: 'backup' } } }), reopen: () => { reopened++ } }
   await runRepairJob(job, dependencies)
   assert.equal(applied, 1); assert.equal(reopened, 1)
-  await runRepairJob(job, { ...dependencies, apply: async () => { throw Error('Access denied') } })
+  await runRepairJob(job, { ...dependencies, stage: async () => ({ discard: async () => {}, commit: async () => { throw Error('Access denied') } }) })
   assert.equal(JSON.parse(await readFile(job.statusFile, 'utf8')).state, 'failed'); assert.equal(reopened, 1)
   await writeFile(job.cancelFile, '')
   await runRepairJob(job, dependencies)

@@ -4,7 +4,7 @@ import vm from 'node:vm'
 import { createHash } from 'node:crypto'
 import { readFile, writeFile, mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { join, resolve, dirname } from 'node:path'
-import { patchDesktopMain, parseArchive, readEntry, replaceEntry, prepareDesktopPatch } from '../scripts/desktop-persistence.mjs'
+import { patchDesktopMain, parseArchive, readEntry, replaceEntry, prepareDesktopPatch, stageDesktopPatch } from '../scripts/desktop-persistence.mjs'
 
 const original = `class Guests {
   partitions = new Map();
@@ -92,6 +92,17 @@ test('new version numbers work with the same guest implementation, while changed
       await writeFile(plan.file, plan.output)
       assert.equal((await prepareDesktopPatch(root)).alreadyPatched, true)
     }
+    await archive('0.3.0')
+    const liveFile = join(root, 'resources/app.asar')
+    const before = await readFile(liveFile)
+    const staged = await stageDesktopPatch(root)
+    assert.deepEqual(await readFile(liveFile), before)
+    await archive('0.3.1')
+    const upgrade = await readFile(liveFile)
+    try {
+      await assert.rejects(staged.commit(), /changed while waiting/)
+      assert.deepEqual(await readFile(liveFile), upgrade)
+    } finally { await staged.discard() }
     await archive('0.3.0', native, 'different.js'); await assert.rejects(prepareDesktopPatch(root), /Unsupported.*build/)
     await archive('0.3.0', 'unknown implementation'); await assert.rejects(prepareDesktopPatch(root), /无法识别/)
     await archive('0.3.0'); exe[exe.length - 4] = 49

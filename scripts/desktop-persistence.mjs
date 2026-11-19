@@ -1,16 +1,16 @@
 /** Narrow, reversible compatibility repair for verified DSH Desktop builds. */
 import * as nodeFiles from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { resolve, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 
 // Electron treats app.asar as a virtual directory. Inspect/replace the physical
 // archive through original-fs; the bundled Node worker uses the normal API.
 export let nativeFileSystem = nodeFiles
 try { nativeFileSystem = createRequire(import.meta.url)('original-fs').promises } catch { /* Regular Node.js. */ }
-const { readFile, writeFile, copyFile, rename } = nativeFileSystem
+const { readFile, writeFile, rename } = nativeFileSystem
 
 const MARKER = '/* dsh-web-aichat: persistent partitions v1 */'
 const sha256 = value => createHash('sha256').update(value).digest('hex')
@@ -92,32 +92,105 @@ export async function prepareDesktopPatch(installDirectory) {
   const source = readEntry(archive, pkg.main).toString('utf8')
   const patched = patchDesktopMain(source)
   const output = patched === source ? bytes : replaceEntry(bytes, pkg.main, patched)
-  return { file, bytes, output, desktopVersion: pkg.version, alreadyPatched: patched === source, before: sha256(bytes), after: sha256(output), main: pkg.main }
+  return { file, bytes, output, executableHash: sha256(executable), desktopVersion: pkg.version, alreadyPatched: patched === source, before: sha256(bytes), after: sha256(output), main: pkg.main }
+}
+
+// Prepare side files while Desktop is running. Only commit() changes the live archive.
+async function fileRevision(path) {
+  const s = await nativeFileSystem.stat(path, { bigint: true })
+  return [s.dev, s.ino, s.size, s.mtimeNs, s.ctimeNs].join('/')
+}
+
+export async function stageDesktopPatch(directory, { watchExit = false } = {}) {
+  const plan = await prepareDesktopPatch(directory)
+  const { file, before, after } = plan
+  if (plan.alreadyPatched) return {
+    commit: async () => ({ status: 'already-patched', file, sha256: after }), discard: async () => {},
+  }
+  const suffix = new Date().toISOString().replace(/[:.]/g, '-') + '-' + randomUUID()
+  const backup = `${file}.bak-aichat-persistence-${suffix}`
+  const temporary = `${file}.aichat-${suffix}.tmp`
+  const executable = join(resolve(directory), 'DeepSeek Harness.exe')
+  const executableHash = plan.executableHash
+  const revisions = new Map()
+  async function remember(path, expected) {
+    const revision = await fileRevision(path)
+    if (sha256(await readFile(path)) !== expected || await fileRevision(path) !== revision) {
+      throw Error('DSH or staged files changed during preparation; original file retained')
+    }
+    revisions.set(path, revision)
+  }
+  let replaced = false
+  let exitCheck
+  async function discard() {
+    exitCheck?.close()
+    await nativeFileSystem.rm(temporary, { force: true })
+    if (!replaced) await nativeFileSystem.rm(backup, { force: true })
+  }
+  try {
+    await writeFile(backup, plan.bytes, { flag: 'wx' })
+    await writeFile(temporary, plan.output, { flag: 'wx' })
+    await remember(file, before)
+    await remember(executable, executableHash)
+    await remember(backup, before)
+    await remember(temporary, after)
+    if (watchExit && process.platform === 'win32') exitCheck = warmExitCheck(directory)
+  } catch (error) { await discard(); throw error }
+  // Reject replacement or modification since verification, including a host update.
+  async function commit() {
+    if (exitCheck) await exitCheck.check()
+    else assertDesktopStopped(directory)
+    for (const [path, revision] of revisions) {
+      if (await fileRevision(path) !== revision) throw Error('DSH or staged files changed while waiting; original file retained')
+    }
+    await rename(temporary, file)
+    replaced = true
+    if (sha256(await readFile(file)) !== after) throw Error('Patched file verification failed; restore the verified backup')
+    return { status: 'patched', file, backup, before, after }
+  }
+  return { commit, discard }
 }
 
 export async function applyDesktopPatch(directory) {
   assertDesktopStopped(directory)
-  const plan = await prepareDesktopPatch(directory)
-  if (plan.alreadyPatched) return { status: 'already-patched', file: plan.file, sha256: plan.after }
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
-  const backup = `${plan.file}.bak-aichat-persistence-${stamp}`
-  const temporary = `${plan.file}.aichat-persistence.tmp`
-  await copyFile(plan.file, backup)
-  if (sha256(await readFile(backup)) !== plan.before) throw Error('Backup verification failed')
-  await writeFile(temporary, plan.output, { flag: 'wx' })
-  if (sha256(await readFile(plan.file)) !== plan.before) throw Error('DSH changed during preparation; original file retained')
-  await rename(temporary, plan.file)
-  if (sha256(await readFile(plan.file)) !== plan.after) throw Error('Patched file verification failed; restore the verified backup')
-  return { status: 'patched', file: plan.file, backup, before: plan.before, after: plan.after }
+  const staged = await stageDesktopPatch(directory)
+  try { return await staged.commit() } finally { await staged.discard() }
 }
 
-function assertDesktopStopped(directory) {
-  if (process.platform !== 'win32') return
-  const executable = join(resolve(directory), 'DeepSeek Harness.exe')
+const processFilter = 'Get-Process -Name "DeepSeek Harness" -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne [int]$env:DSH_AICHAT_REPAIR_PID -and (!$_.Path -or $_.Path -eq $env:DSH_AICHAT_NATIVE_TARGET) }'
+function checkEnvironment(directory) {
+  return { ...process.env, DSH_AICHAT_NATIVE_TARGET: join(resolve(directory), 'DeepSeek Harness.exe'), DSH_AICHAT_REPAIR_PID: String(process.pid) }
+}
+// Avoid launching PowerShell in the short interval between quit and a manual relaunch.
+function warmExitCheck(directory) {
+  const child = spawn('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
+    `if ([Console]::ReadLine() -cne "check") { exit 2 }; if (@(${processFilter}).Count) { exit 3 }; exit 0`],
+  { windowsHide: true, stdio: ['pipe', 'ignore', 'ignore'], env: checkEnvironment(directory) })
+  const ended = new Promise(resolve => {
+    child.once('error', () => resolve(-1))
+    child.once('exit', code => resolve(code))
+  })
+  child.stdin.on('error', () => {}) // The exit code also reports a failed checker.
+  return {
+    close: () => child.stdin.end(),
+    async check() {
+      child.stdin.end('check\n')
+      const code = await ended
+      if (code === 3) throw Error('DSH 已再次启动，文件尚未切换。')
+      if (code !== 0) throw Error('无法确认 DSH 已完整退出。')
+    },
+  }
+}
+
+export function desktopProcessIds(directory) {
+  if (process.platform !== 'win32') return []
   const output = execFileSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
-    'Get-Process -Name "DeepSeek Harness" -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $env:DSH_AICHAT_NATIVE_TARGET -and $_.Id -ne [int]$env:DSH_AICHAT_REPAIR_PID } | Select-Object -ExpandProperty Id; exit 0'],
-  { windowsHide: true, env: { ...process.env, DSH_AICHAT_NATIVE_TARGET: executable, DSH_AICHAT_REPAIR_PID: String(process.pid) }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
-  if (output.trim()) throw Error('Please fully quit DSH Desktop before applying or restoring this compatibility repair')
+    processFilter + ' | Select-Object -ExpandProperty Id; exit 0'],
+  { windowsHide: true, env: checkEnvironment(directory), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  return output.trim() ? output.trim().split(/\s+/).map(Number) : []
+}
+function assertDesktopStopped(directory) {
+  if (desktopProcessIds(directory).length) throw Error('Please fully quit DSH Desktop before applying or restoring this compatibility repair')
 }
 
 export async function restoreDesktopPatch(directory, backup) {

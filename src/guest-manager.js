@@ -107,7 +107,11 @@ export function createGuestManager({ bridge, document, onChange = () => {} }) {
         const reservation = await bridge.acquire(`dsh-web-aichat:${provider.id}`)
         lease = reservation.lease
         if (disposed || cancelled.has(token)) { await release(lease); return null }
-        notify(provider.id, { persistent: reservation.partition.startsWith('persist:') })
+        if (!reservation.partition?.startsWith('persist:') || reservation.partition === 'persist:') {
+          await release(lease)
+          if (!cancelled.has(token)) notify(provider.id, { persistent: false, loading: false })
+          return null
+        }
         const element = document.createElement('webview')
         const container = document.createElement('div')
         entry = { element, container, lease, listeners: [], ready: false, origin: new URL(url).origin }
@@ -163,6 +167,7 @@ export function createGuestManager({ bridge, document, onChange = () => {} }) {
         entries.set(provider.id, entry)
         container.appendChild(element)
         document.body.appendChild(container)
+        notify(provider.id, { persistent: true })
         reposition()
         return entry
       } catch {

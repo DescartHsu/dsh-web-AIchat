@@ -29,11 +29,11 @@ async function launchWorker(directory, worker, jobFile) {
     join(directory, 'resources/runtime/primary-runtime/dependencies/node/node.exe')]
   let executable = process.execPath
   for (const candidate of candidates) if (await exists(candidate)) { executable = candidate; break }
-  await new Promise((accept, reject) => {
+  return new Promise((accept, reject) => {
     const child = spawn(executable, [worker, jobFile], { detached: true, windowsHide: true, stdio: 'ignore',
       env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } })
     child.once('error', reject)
-    child.once('spawn', () => { child.unref(); accept() })
+    child.once('spawn', () => { child.unref(); accept(child.pid) })
   })
 }
 export function createPersistenceService(options = {}) {
@@ -41,6 +41,10 @@ export function createPersistenceService(options = {}) {
   const detect = options.detect || findDesktopInstall
   const prepare = options.prepare || prepareDesktopPatch
   const launch = options.launch || launchWorker
+  const workerAlive = options.workerAlive || (pid => {
+    if (!Number.isSafeInteger(pid) || pid <= 0) return false
+    try { process.kill(pid, 0); return true } catch (error) { return error.code === 'EPERM' }
+  })
   const root = options.root || repairDirectory()
   const assetRoot = options.assetRoot || dirname(fileURLToPath(import.meta.url))
   const latest = join(root, 'latest.json')
@@ -54,13 +58,16 @@ export function createPersistenceService(options = {}) {
     const previous = await readLatest()
     let job = null
     if (previous) { try { job = JSON.parse(await readFile(previous.statusFile, 'utf8')) } catch { /* Not started yet. */ } }
+    if (['waiting', 'queued', 'applying'].includes(job?.state) && !workerAlive(previous.workerPid)) {
+      job = { ...job, state: 'interrupted', message: '上次登录存储设置已中断，可以重新准备。' }
+    }
     if (platform !== 'win32') return { supported: false, message: '自动登录存储配置目前支持已验证版本的 Windows DSH Desktop。', job }
     try {
       capability ||= (async () => {
         const installDirectory = await detect()
         const plan = await prepare(installDirectory)
         return { supported: true, installDirectory, desktopVersion: plan.desktopVersion, onDiskEnabled: plan.alreadyPatched }
-      })()
+      })().catch(error => { capability = null; throw error })
       const info = await capability
       if (previous?.installDirectory && resolve(previous.installDirectory).toLowerCase() !== resolve(info.installDirectory).toLowerCase()) job = null
       return { ...info, job, setupError }
@@ -71,9 +78,10 @@ export function createPersistenceService(options = {}) {
     if (!current.supported) throw Error(current.message)
     if (current.onDiskEnabled) return current
     const previous = await readLatest()
-    if ((previous?.automatic || previous?.expiresAt > Date.now()) && ['waiting', 'applying', 'queued'].includes(current.job?.state)
+    if ((previous?.automatic || previous?.expiresAt > Date.now()) && ['waiting', 'applying', 'queued', 'interrupted'].includes(current.job?.state)
       && !(previous.cancelFile && await exists(previous.cancelFile))) {
-      if (previous.pluginVersion === manifest.version && previous.desktopVersion === current.desktopVersion) return current
+      if (current.job.state !== 'interrupted' && previous.ownerPid === process.pid
+        && previous.pluginVersion === manifest.version && previous.desktopVersion === current.desktopVersion) return current
       await cancel(previous.id)
     }
     const id = randomUUID(), directory = join(root, id)
@@ -88,10 +96,12 @@ export function createPersistenceService(options = {}) {
     const jobFile = join(directory, 'job.json')
     await writeFile(jobFile, JSON.stringify(job), { mode: 0o600 })
     await writeFile(job.statusFile, JSON.stringify({ jobId: id, state: 'queued', automatic,
-      message: automatic ? '已安排在下次正常退出 DSH 时配置登录保留，完成后会自动重开一次。' : '修复工具已准备，请从“应用 → 退出”完整退出 DSH。' }), { mode: 0o600 })
-    await writeFile(latest, JSON.stringify(job), { mode: 0o600 })
-    try { await launch(current.installDirectory, worker, jobFile) }
-    catch (error) { await writeFile(job.statusFile, JSON.stringify({ jobId: id, state: 'failed', message: '无法启动修复工具：' + error.message })); throw error }
+      message: automatic ? '请从「应用 → 退出」完整退出 DSH，等待工具完成登录存储设置并自动重开。' : '修复工具已准备，请从“应用 → 退出”完整退出 DSH。' }), { mode: 0o600 })
+    try { job.workerPid = await launch(current.installDirectory, worker, jobFile) }
+    catch (error) {
+      await writeFile(job.statusFile, JSON.stringify({ jobId: id, state: 'failed', message: '无法启动修复工具：' + error.message }))
+      throw error
+    } finally { await writeFile(latest, JSON.stringify(job), { mode: 0o600 }) }
     return { ...current, job: JSON.parse(await readFile(job.statusFile, 'utf8')) }
   }
   function start(options) {

@@ -19,7 +19,7 @@ const deferred = () => { let resolve; const promise = new Promise(r => { resolve
 function fixture(overrides = {}) {
   let count = 0
   const released = [], callbacks = new Map(), document = { body: new Element(), createElement: () => new Element() }
-  const bridge = { async acquire(workspace) { return { lease: `lease-${++count}`, partition: workspace } },
+  const bridge = { async acquire(workspace) { return { lease: `lease-${++count}`, partition: `persist:${workspace}` } },
     async release(lease) { released.push(lease) },
     onOpenRequested(lease, callback) { callbacks.set(lease, callback); return () => callbacks.delete(lease) }, ...overrides }
   return { document, released, callbacks, manager: createGuestManager({ bridge, document }) }
@@ -56,7 +56,7 @@ test('rapid repeated requests share a pending acquisition and cannot steal activ
   const p1 = manager.ensure(DEFAULT_PROVIDERS[0])
   assert.equal(manager.ensure(DEFAULT_PROVIDERS[0]), p1)
   manager.show('chatgpt', new Element())
-  gate.resolve({ lease: 'slow', partition: 'slow' })
+  gate.resolve({ lease: 'slow', partition: 'persist:slow' })
   const a = await p1
   assert.equal(a.container.style.display, 'none')
   await manager.dispose()
@@ -66,7 +66,7 @@ test('unloading while acquiring releases the late lease and never mounts a page'
   const { manager, document, released } = fixture({ acquire: () => gate.promise })
   const pending = manager.ensure(DEFAULT_PROVIDERS[0])
   const done = manager.dispose()
-  gate.resolve({ lease: 'late', partition: 'late' })
+  gate.resolve({ lease: 'late', partition: 'persist:late' })
   assert.equal(await pending, null)
   await done
   await manager.dispose()
@@ -78,7 +78,7 @@ test('removing a site during acquisition cancels it, then allows a clean retry',
   const { manager, document, released } = fixture({ acquire: () => gate.promise })
   manager.ensure(DEFAULT_PROVIDERS[0])
   const closing = manager.close('deepseek')
-  gate.resolve({ lease: 'cancelled', partition: 'cancelled' })
+  gate.resolve({ lease: 'cancelled', partition: 'persist:cancelled' })
   await closing
   assert.deepEqual(released, ['cancelled'])
   assert.equal(document.body.children.length, 0)
@@ -90,7 +90,7 @@ test('a failed acquisition can be retried, including a synchronously throwing br
   let attempts = 0
   const { manager } = fixture({ acquire() {
     if (++attempts === 1) throw Error('unavailable')
-    return Promise.resolve({ lease: 'retry', partition: 'retry' })
+    return Promise.resolve({ lease: 'retry', partition: 'persist:retry' })
   } })
   assert.equal(await manager.ensure(DEFAULT_PROVIDERS[0]), null)
   assert.match(manager.status('deepseek').error, /无法创建/)
