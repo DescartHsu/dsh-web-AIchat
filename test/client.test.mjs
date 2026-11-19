@@ -146,20 +146,16 @@ test('built client has a usable fallback when the Desktop bridge is absent', asy
   } finally { await fixture.finish() }
 })
 
-test('when a host upgrade prevents persistent storage, the user can open a temporary guest and reuse it', async () => {
+test('when persistent storage is unavailable, the site opens immediately and keeps its temporary guest across tabs', async () => {
   const fixture = await boot(true, async () => ({ ok: true, status: 200,
     json: async () => ({ ok: true, supported: false, message: '网页存储实现已变更' }) }), false)
   try {
     const { window } = fixture
     const doc = window.document
     const guest = () => doc.querySelector('[data-dsh-web-aichat=deepseek] webview')
-    assert.equal(guest(), null)
-    assert.match(doc.body.textContent, /网页存储实现已变更/)
-    assert.equal(doc.querySelector('a[target="_blank"]').href, 'https://chat.deepseek.com/')
-    const openTemporary = [...doc.querySelectorAll('button')].find(button => button.textContent === '使用临时会话')
-    await act(async () => openTemporary.click())
     const opened = guest()
     assert.ok(opened)
+    assert.equal(fixture.released.length, 0)
     await act(async () => {
       opened.dispatchEvent(new window.Event('dom-ready'))
       opened.dispatchEvent(new window.Event('did-stop-loading'))
@@ -167,13 +163,13 @@ test('when a host upgrade prevents persistent storage, the user can open a tempo
     assert.deepEqual(opened.loads, ['https://chat.deepseek.com/'])
     assert.match(doc.querySelector('.aic-status').textContent, /临时会话/)
     await act(async () => doc.getElementById('aic-tab-chatgpt').click())
-    assert.equal(doc.querySelector('[data-dsh-web-aichat=chatgpt] webview'), null)
+    assert.ok(doc.querySelector('[data-dsh-web-aichat=chatgpt] webview'))
     await act(async () => doc.getElementById('aic-tab-deepseek').click())
     assert.equal(guest(), opened)
   } finally { await fixture.finish() }
 })
 
-test('fresh desktop setup needs no repair click and does not open a temporary login page', async () => {
+test('pending automatic setup does not gate the chat and stays available in the status panel', async () => {
   const calls = []
   const fixture = await boot(true, async (url, options) => {
     calls.push({ url, method: options.method })
@@ -183,14 +179,18 @@ test('fresh desktop setup needs no repair click and does not open a temporary lo
   try {
     const doc = fixture.window.document
     const click = async text => { const button = [...doc.querySelectorAll('button')].find(item => item.textContent === text); assert.ok(button, text); await act(async () => button.click()) }
-    assert.match(doc.body.textContent, /已自动准备/)
-    assert.equal(doc.querySelectorAll('webview').length, 0)
-    assert.equal(calls.filter(call => call.url.endsWith('/prepare')).length, 0)
+    const opened = doc.querySelector('webview')
+    assert.ok(opened)
+    assert.match(doc.querySelector('.aic-status').textContent, /临时会话/)
+    assert.deepEqual(calls, [])
     await click('登录存储状态')
     assert.match(doc.body.textContent, /D:\/Apps\/Harness/)
+    assert.match(doc.body.textContent, /已自动准备/)
     assert.equal([...doc.querySelectorAll('button')].some(item => /启用登录保留|准备修复|重试自动设置/.test(item.textContent)), false)
     assert.equal(calls.filter(call => call.url.endsWith('/prepare')).length, 0)
     assert.doesNotMatch(doc.body.textContent, /登录状态自动保留/)
+    await click('返回聊天')
+    assert.equal(doc.querySelector('webview'), opened)
   } finally { await fixture.finish() }
 })
 

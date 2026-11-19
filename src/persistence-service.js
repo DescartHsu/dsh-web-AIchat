@@ -88,7 +88,7 @@ export function createPersistenceService(options = {}) {
     const jobFile = join(directory, 'job.json')
     await writeFile(jobFile, JSON.stringify(job), { mode: 0o600 })
     await writeFile(job.statusFile, JSON.stringify({ jobId: id, state: 'queued', automatic,
-      message: automatic ? '首次登录存储已自动准备，无需点击修复。下次完整退出 DSH 时将完成设置并自动重开一次，请重开后再登录。' : '修复工具已准备，请从“应用 → 退出”完整退出 DSH。' }), { mode: 0o600 })
+      message: automatic ? '已安排在下次正常退出 DSH 时配置登录保留，完成后会自动重开一次。' : '修复工具已准备，请从“应用 → 退出”完整退出 DSH。' }), { mode: 0o600 })
     await writeFile(latest, JSON.stringify(job), { mode: 0o600 })
     try { await launch(current.installDirectory, worker, jobFile) }
     catch (error) { await writeFile(job.statusFile, JSON.stringify({ jobId: id, state: 'failed', message: '无法启动修复工具：' + error.message })); throw error }

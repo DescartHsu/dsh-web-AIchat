@@ -3,7 +3,7 @@ import { guestThemeCSS, installGuestTheme } from './theme.js'
 import { installDeepseekNoticeDismissal } from './deepseek-notice.js'
 
 /** Owns leases independently of React mounts, so switching panels preserves pages. */
-export function createGuestManager({ bridge, document, onChange = () => {}, requirePersistent = false }) {
+export function createGuestManager({ bridge, document, onChange = () => {} }) {
   const entries = new Map()
   const pending = new Map()
   const cancelled = new Set()
@@ -92,14 +92,14 @@ export function createGuestManager({ bridge, document, onChange = () => {}, requ
     if (host && viewport !== host) return
     visibleId = null; viewport = null; reposition()
   }
-  function ensure(provider, { allowTemporary = false } = {}) {
+  function ensure(provider) {
     if (disposed || !available) return Promise.resolve(null)
     if (entries.has(provider.id)) return Promise.resolve(entries.get(provider.id))
     if (pending.has(provider.id)) return pending.get(provider.id)
     const url = safeWebUrl(provider.url, true)
     if (!url) return Promise.resolve(null)
     const token = {}
-    notify(provider.id, { title: provider.name, url, loading: true, ready: false, storageBlocked: false, error: '', popup: '' })
+    notify(provider.id, { title: provider.name, url, loading: true, ready: false, error: '', popup: '' })
     const operation = Promise.resolve().then(async () => {
       let lease
       let entry
@@ -107,13 +107,7 @@ export function createGuestManager({ bridge, document, onChange = () => {}, requ
         const reservation = await bridge.acquire(`dsh-web-aichat:${provider.id}`)
         lease = reservation.lease
         if (disposed || cancelled.has(token)) { await release(lease); return null }
-        const persistent = reservation.partition.startsWith('persist:')
-        if (requirePersistent && !persistent && !allowTemporary) {
-          await release(lease)
-          notify(provider.id, { persistent, storageBlocked: true, loading: false })
-          return null
-        }
-        notify(provider.id, { persistent })
+        notify(provider.id, { persistent: reservation.partition.startsWith('persist:') })
         const element = document.createElement('webview')
         const container = document.createElement('div')
         entry = { element, container, lease, listeners: [], ready: false, origin: new URL(url).origin }

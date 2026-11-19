@@ -40,7 +40,7 @@ export async function runRepairJob(job, dependencies = {}) {
     try { await access(job.cancelFile); return true } catch { return false }
   }
   await save({ state: 'waiting', message: job.automatic
-    ? '首次登录存储已自动准备，无需点击修复。下次完整退出 DSH 时将完成设置并自动重开一次，请重开后再登录。'
+    ? '已安排在下次正常退出 DSH 时配置登录保留，完成后会自动重开一次。'
     : '准备就绪，请从 DSH 的“应用 → 退出”完整退出。退出后将自动修复并重新打开。' })
   while (job.automatic || now() < job.expiresAt) {
     if (await cancelled()) { await save({ state: 'cancelled', message: '插件已停用或重新加载，本次自动设置已取消。' }); return }
@@ -54,7 +54,7 @@ export async function runRepairJob(job, dependencies = {}) {
         await save({ state: 'applying', message: '正在备份并启用登录保留…' })
         try {
           const result = await apply(job.installDirectory)
-          await save({ state: 'complete', message: '修复已完成。请在各官网重新登录一次，以后将按官网有效期保留登录。', backup: result.backup || null })
+          await save({ state: 'complete', message: '登录保留配置已完成。需要时可在官网登录。', backup: result.backup || null })
           reopen(job.installDirectory)
           return
         } catch (error) {
