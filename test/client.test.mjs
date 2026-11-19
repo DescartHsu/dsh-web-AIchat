@@ -142,7 +142,34 @@ test('built client has a usable fallback when the Desktop bridge is absent', asy
     assert.match(fixture.window.document.body.textContent, /需要桌面客户端/)
     assert.equal(fixture.window.document.querySelectorAll('webview, iframe').length, 0)
     await act(async () => fixture.window.document.getElementById('aic-tab-claude').click())
-    assert.match(fixture.window.document.body.textContent, /https:\/\/claude.ai\//)
+    assert.equal(fixture.window.document.querySelector('a[target="_blank"]').href, 'https://claude.ai/')
+  } finally { await fixture.finish() }
+})
+
+test('when a host upgrade prevents persistent storage, the user can open a temporary guest and reuse it', async () => {
+  const fixture = await boot(true, async () => ({ ok: true, status: 200,
+    json: async () => ({ ok: true, supported: false, message: '网页存储实现已变更' }) }), false)
+  try {
+    const { window } = fixture
+    const doc = window.document
+    const guest = () => doc.querySelector('[data-dsh-web-aichat=deepseek] webview')
+    assert.equal(guest(), null)
+    assert.match(doc.body.textContent, /网页存储实现已变更/)
+    assert.equal(doc.querySelector('a[target="_blank"]').href, 'https://chat.deepseek.com/')
+    const openTemporary = [...doc.querySelectorAll('button')].find(button => button.textContent === '使用临时会话')
+    await act(async () => openTemporary.click())
+    const opened = guest()
+    assert.ok(opened)
+    await act(async () => {
+      opened.dispatchEvent(new window.Event('dom-ready'))
+      opened.dispatchEvent(new window.Event('did-stop-loading'))
+    })
+    assert.deepEqual(opened.loads, ['https://chat.deepseek.com/'])
+    assert.match(doc.querySelector('.aic-status').textContent, /临时会话/)
+    await act(async () => doc.getElementById('aic-tab-chatgpt').click())
+    assert.equal(doc.querySelector('[data-dsh-web-aichat=chatgpt] webview'), null)
+    await act(async () => doc.getElementById('aic-tab-deepseek').click())
+    assert.equal(guest(), opened)
   } finally { await fixture.finish() }
 })
 

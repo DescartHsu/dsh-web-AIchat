@@ -146,16 +146,19 @@ window.__ModuleLoader__.load({
       const state = manager.status(current.id)
       const needsSetup = manager.available && state.persistent === false
       const setupMessage = setupInfo?.setupError || (!setupInfo?.supported && setupInfo?.message)
-        || setupInfo?.job?.message || '正在自动准备登录保留，无需点击修复。首次设置需完整退出 DSH 一次，自动重开后再登录。'
+        || (setupInfo?.onDiskEnabled && '登录存储已准备好。请完整退出并重新打开 DSH。')
+        || setupInfo?.job?.message || '正在检查登录存储。需要配置时，请完整退出 DSH 一次。'
+      const browserLink = current.url && h('a', { className: 'aic-button', href: current.url,
+        target: '_blank', rel: 'noopener noreferrer' }, '在浏览器中打开')
       React.useEffect(() => {
-        if (!needsSetup) return
+        if (!state.storageBlocked) return
         let alive = true
         const update = () => persistenceRequest('status').then(data => { if (alive) setSetupInfo(data) })
           .catch(cause => { if (alive) setSetupInfo({ setupError: cause.message }) })
         void update()
         const timer = setInterval(update, 2000)
         return () => { alive = false; clearInterval(timer) }
-      }, [needsSetup])
+      }, [state.storageBlocked])
       React.useEffect(() => { listeners.add(rerender); rerender(); return () => listeners.delete(rerender) }, [])
       React.useEffect(() => {
         const host = hostRef.current
@@ -278,7 +281,8 @@ window.__ModuleLoader__.load({
             button('重新打开', '关闭并重新创建当前网页', () => void reopen(), !manager.available || reopening)),
           h('div', { className: `aic-status${state.error ? ' aic-error' : ''}`, role: state.error ? 'alert' : 'status', 'aria-live': 'polite' },
             (!current.id ? '还没有网站，请点击“管理网站”添加或恢复。' : state.error || state.themeError || (reopening ? '正在重新打开…' : state.loading ? `正在加载 ${current.name}…` : notice || storageNotice ||
-              (state.persistent ? '登录状态自动保留 · 官网过期或要求验证时需重新登录' : setupMessage)))),
+              (state.persistent ? '登录状态自动保留 · 官网过期或要求验证时需重新登录'
+                : state.persistent === false && !state.storageBlocked ? '临时会话 · 重启 DSH 后需要重新登录' : setupMessage)))),
           state.popup ? h('div', { className: 'aic-popup' },
             h('span', null, '官网请求打开：', h('code', null, state.popup)),
             button('在当前页打开', '在当前页打开该链接', () => void manager.navigate(current.id, 'url', state.popup)),
@@ -288,10 +292,11 @@ window.__ModuleLoader__.load({
             !current.id ? h('div', { className: 'aic-empty' }, h('h2', null, '还没有网站'),
               h('button', { className: 'aic-button', onClick: () => setSettings(true) }, '添加或恢复网站')) : !manager.available ? h('div', { className: 'aic-empty' }, h(Icon, { size: 38 }),
               h('h2', null, '在 DSH Desktop 中打开 AI Chat'),
-              h('p', null, '内嵌聊天需要桌面客户端的 Browser guest bridge。当前环境可使用顶部标签选择网站并复制地址。'),
-              h('code', null, current.url)) : needsSetup ? h('div', { className: 'aic-empty' }, h(Icon, { size: 38 }),
-              h('h2', null, '首次登录存储自动设置'), h('p', null, setupMessage),
-              h('p', null, '设置完成后将打开官网，再登录一次即可在下次启动时继续使用。')) : null)))
+              h('p', null, '内嵌聊天需要桌面客户端提供网页接口。'), browserLink) : state.storageBlocked ? h('div', { className: 'aic-empty' }, h(Icon, { size: 38 }),
+              h('h2', null, '登录存储待恢复'), h('p', null, setupMessage),
+              h('p', null, '临时会话可以立即使用，登录状态会在退出 DSH 时清除。'),
+              h('button', { type: 'button', className: 'aic-button', onClick: () => void manager.ensure(current, { allowTemporary: true }) }, '使用临时会话'),
+              ' ', browserLink) : state.error && !state.ready ? h('div', { className: 'aic-empty' }, browserLink) : null)))
     }
     function apply(ctx) {
       ctx.effect(() => {

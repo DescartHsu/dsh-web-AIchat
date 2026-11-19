@@ -13,7 +13,6 @@ try { nativeFileSystem = createRequire(import.meta.url)('original-fs').promises 
 const { readFile, writeFile, copyFile, rename } = nativeFileSystem
 
 const MARKER = '/* dsh-web-aichat: persistent partitions v1 */'
-export const SUPPORTED_DESKTOP_VERSIONS = Object.freeze(['0.2.1-rc.3', '0.2.1-rc.4', '0.2.1-rc.5', '0.2.2-alpha.2', '0.2.2-rc.1', '0.2.2-rc.2', '0.2.2-rc.3'])
 const sha256 = value => createHash('sha256').update(value).digest('hex')
 export function parseArchive(bytes) {
   const length = bytes.readUInt32LE(12)
@@ -35,15 +34,20 @@ export function readEntry(archive, path) {
   return archive.data.subarray(Number(entry.offset), Number(entry.offset) + entry.size)
 }
 export function patchDesktopMain(source) {
-  if (source.includes(MARKER)) return source
-  const block = /let partition = this\.partitions\.get\(workspace\);[\s\S]{0,700}?this\.partitions\.set\(workspace, partition\);/g
-  const matches = [...source.matchAll(block)]
-  if (matches.length !== 1) throw Error('Unknown DSH browser partition implementation; refusing to patch')
-  const old = matches[0][0]
   const assignment = /partition = `dsh-sidebar-browser-\$\{([a-zA-Z_$][\w$]*)\(\)\}`;/
-  if (!assignment.test(old) || !old.includes('this.configureSession(session.fromPartition(partition))')) throw Error('Unknown DSH guest policy; refusing to patch')
-  const changed = old.replace(assignment, (_, randomUUID) => `${MARKER}\n\t\t\tpartition = /^dsh-web-aichat:[a-z0-9-]{1,100}$/.test(workspace)\n\t\t\t\t? \`persist:\${workspace.replace(":", "-")}\`\n\t\t\t\t: \`dsh-sidebar-browser-\${${randomUUID}()}\`;`)
-  return source.replace(old, changed)
+  const replacement = randomUUID => `${MARKER}\n\t\t\tpartition = /^dsh-web-aichat:[a-z0-9-]{1,100}$/.test(workspace)\n\t\t\t\t? \`persist:\${workspace.replace(":", "-")}\`\n\t\t\t\t: \`dsh-sidebar-browser-\${${randomUUID}()}\`;`
+  // Validate the original and installed repair against the same exact partition
+  // selection and session configuration sequence before changing the archive.
+  const legacy = /\/\* dsh-web-aichat: persistent partitions v1 \*\/\n\t{3}partition = \/\^dsh-web-aichat:\[a-z0-9-\]\{1,100\}\$\/\.test\(workspace\)\n\t{4}\? `persist:\$\{workspace\.replace\(":", "-"\)\}`\n\t{4}: `dsh-sidebar-browser-\$\{([a-zA-Z_$][\w$]*)\(\)\}`;/g
+  const alreadyPatched = source.includes(MARKER)
+  const original = source.replace(legacy, (_, randomUUID) => 'partition = `dsh-sidebar-browser-${' + randomUUID + '()}`;')
+  const block = /let partition = this\.partitions\.get\(workspace\);\s*if \(partition === (?:void 0|undefined)\) \{\s*partition = `dsh-sidebar-browser-\$\{[a-zA-Z_$][\w$]*\(\)\}`;\s*this\.configureSession\(session\.fromPartition\(partition\)\);\s*this\.partitions\.set\(workspace, partition\);\s*\}/g
+  const matches = [...original.matchAll(block)]
+  if (matches.length !== 1) throw Error('无法识别 DSH 的网页存储实现，已暂停自动配置。')
+  const old = matches[0][0]
+  const patched = original.replace(old, old.replace(assignment, (_, randomUUID) => replacement(randomUUID)))
+  if (alreadyPatched && (original.includes(MARKER) || patched !== source)) throw Error('DSH 的旧登录存储修改无法验证，已暂停自动配置。')
+  return patched
 }
 export function replaceEntry(bytes, path, replacement) {
   const archive = parseArchive(bytes)
@@ -75,11 +79,15 @@ export async function prepareDesktopPatch(installDirectory) {
   const bytes = await readFile(file)
   const archive = parseArchive(bytes)
   const pkg = JSON.parse(readEntry(archive, 'package.json').toString('utf8'))
-  if (!SUPPORTED_DESKTOP_VERSIONS.includes(pkg.version) || pkg.main !== 'lib/main.js') throw Error(`Unsupported DSH Desktop build: ${pkg.version}. Verified versions: ${SUPPORTED_DESKTOP_VERSIONS.join(', ')}`)
+  if (pkg.name !== '@deepseek-ai/dsh-desktop' || typeof pkg.version !== 'string' || !pkg.version || pkg.main !== 'lib/main.js') {
+    throw Error(`Unsupported DSH Desktop build: ${pkg.version}`)
+  }
   const executable = await readFile(join(directory, 'DeepSeek Harness.exe'))
   const sentinel = Buffer.from('dL7pKGdnNz796PbbjQWNKmHXBZaB9tsX')
   const position = executable.indexOf(sentinel)
-  if (position < 0 || executable[position + sentinel.length] !== 1) throw Error('Unknown Electron fuse format')
+  const fuseCount = executable[position + sentinel.length + 1]
+  if (position < 0 || executable[position + sentinel.length] !== 1 || fuseCount < 5
+    || position + sentinel.length + 2 + fuseCount > executable.length) throw Error('Unknown Electron fuse format')
   if (executable[position + sentinel.length + 2 + 4] !== 48) throw Error('Embedded archive validation is enabled; refusing to alter or disable it')
   const source = readEntry(archive, pkg.main).toString('utf8')
   const patched = patchDesktopMain(source)
